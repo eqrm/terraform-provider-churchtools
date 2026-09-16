@@ -1,0 +1,171 @@
+{
+  "version": 1,
+  "host": "https://example.church.tools",
+  "resources": {
+    "hauptstandort": {
+      "type": "campus",
+      "id": 0,
+      "key": "hauptstandort",
+      "fields": {
+        "name": "Hauptstandort",
+        "shorty": "HS"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "nordstadt": {
+      "type": "campus",
+      "id": 3,
+      "key": "nordstadt",
+      "fields": {
+        "name": "Nordstadt",
+        "shorty": "ND"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "suedstadt": {
+      "type": "campus",
+      "id": 4,
+      "key": "suedstadt",
+      "fields": {
+        "name": "Südstadt",
+        "shorty": "SD"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "weststadt": {
+      "type": "campus",
+      "id": 5,
+      "key": "weststadt",
+      "fields": {
+        "name": "Weststadt",
+        "shorty": "WS"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "oststadt": {
+      "type": "campus",
+      "id": 6,
+      "key": "oststadt",
+      "fields": {
+        "name": "Oststadt",
+        "shorty": "OS"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "altstadt": {
+      "type": "campus",
+      "id": 7,
+      "key": "altstadt",
+      "fields": {
+        "name": "Altstadt",
+        "shorty": "AS"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "neustadt": {
+      "type": "campus",
+      "id": 8,
+      "key": "neustadt",
+      "fields": {
+        "name": "Neustadt",
+        "shorty": "NS"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "seedorf": {
+      "type": "campus",
+      "id": 9,
+      "key": "seedorf",
+      "fields": {
+        "name": "Seedorf",
+        "shorty": "SE"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "bergheim": {
+      "type": "campus",
+      "id": 10,
+      "key": "bergheim",
+      "fields": {
+        "name": "Bergheim",
+        "shorty": "BH"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "talheim": {
+      "type": "campus",
+      "id": 11,
+      "key": "talheim",
+      "fields": {
+        "name": "Talheim",
+        "shorty": "TH"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "waldhof": {
+      "type": "campus",
+      "id": 12,
+      "key": "waldhof",
+      "fields": {
+        "name": "Waldhof",
+        "shorty": "WH"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "feldkirch": {
+      "type": "campus",
+      "id": 13,
+      "key": "feldkirch",
+      "fields": {
+        "name": "Feldkirch",
+        "shorty": "FK"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "steinbach": {
+      "type": "campus",
+      "id": 14,
+      "key": "steinbach",
+      "fields": {
+        "name": "Steinbach",
+        "shorty": "SB"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "rosenau": {
+      "type": "campus",
+      "id": 15,
+      "key": "rosenau",
+      "fields": {
+        "name": "Rosenau",
+        "shorty": "RA"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "lindenhof": {
+      "type": "campus",
+      "id": 16,
+      "key": "lindenhof",
+      "fields": {
+        "name": "Lindenhof",
+        "shorty": "LH"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  }
+}
