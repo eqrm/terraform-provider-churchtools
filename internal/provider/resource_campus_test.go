@@ -2,6 +2,7 @@ package provider_test
 
 import (
 	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/eqrm/terraform-provider-churchtools/internal/provider"
@@ -94,4 +95,21 @@ resource "churchtools_campus" "mainz" {
 			},
 		},
 	})
+}
+
+// The mock must refuse a collection it does not know about. Without this the
+// acceptance suite cannot catch a resource built on an endpoint that does not
+// exist on a live ChurchTools instance.
+func TestMockRejectsUnregisteredCollection(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+
+	resp, err := http.Get(mock.URL + "/api/departments")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("unregistered collection returned %d, want 404", resp.StatusCode)
+	}
 }

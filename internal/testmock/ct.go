@@ -70,11 +70,47 @@ func splitPath(path string) (collection, id string) {
 	return collection, id
 }
 
+// supportedVerbs records which HTTP verbs ChurchTools actually serves for each
+// collection. The mock used to answer every verb on every path, which meant an
+// acceptance test could not tell a working endpoint from one that does not
+// exist on a live instance: a resource built on a REST verb CT does not offer
+// would still go green in CI.
+//
+// Add a collection here when you add a resource for it, with the verbs a real
+// instance supports. An unregistered collection answers 404, exactly as CT does
+// for a path it has no route for.
+var supportedVerbs = map[string]map[string]bool{
+	"/campuses": {
+		http.MethodGet:    true,
+		http.MethodPost:   true,
+		http.MethodPut:    true,
+		http.MethodDelete: true,
+	},
+}
+
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	collection, id := splitPath(r.URL.Path)
+
+	verbs, known := supportedVerbs[collection]
+	if !known {
+		w.WriteHeader(http.StatusNotFound)
+		writeData(w, map[string]any{
+			"message": "unknown collection " + collection +
+				" -- register it in testmock.supportedVerbs with the verbs a live instance supports",
+		})
+		return
+	}
+	if !verbs[r.Method] {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		writeData(w, map[string]any{
+			"message": "ChurchTools serves no " + r.Method + " on " + collection,
+		})
+		return
+	}
+
 	if s.rows[collection] == nil {
 		s.rows[collection] = map[string]any{}
 	}
