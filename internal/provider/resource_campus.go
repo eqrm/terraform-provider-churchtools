@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/eqrm/terraform-provider-churchtools/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -51,16 +50,7 @@ func (r *campusResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 }
 
 func (r *campusResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
-	}
-	data, ok := req.ProviderData.(*ProviderData)
-	if !ok {
-		resp.Diagnostics.AddError(notConfiguredSummary,
-			fmt.Sprintf("Unerwarteter Provider-Datentyp: %T", req.ProviderData))
-		return
-	}
-	r.client = client.New(data.Host, data.Token)
+	r.client = configureClient(req, resp)
 }
 
 func (r *campusResource) body(m campusModel) client.Row {

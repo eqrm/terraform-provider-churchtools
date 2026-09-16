@@ -119,3 +119,115 @@ func TestGolden_CampusNoOp(t *testing.T) {
 		},
 	})
 }
+
+var tier0Collections = map[string]string{
+	"campus":         "/campuses",
+	"group-type":     "/group/grouptypes",
+	"department":     "/departments",
+	"person-status":  "/statuses",
+	"comment-viewer": "/person/commentviewers",
+}
+
+var tier0HCLTypes = map[string]string{
+	"campus":         "churchtools_campus",
+	"group-type":     "churchtools_group_type",
+	"department":     "churchtools_department",
+	"person-status":  "churchtools_person_status",
+	"comment-viewer": "churchtools_comment_viewer",
+}
+
+// tier0Attrs maps CT's camelCase state fields onto the provider's snake_case
+// attributes. It must stay identical to HCL_ATTR in ct-cli's src/export/hcl.ts;
+// a divergence here is exactly the bug this test exists to catch.
+var tier0Attrs = map[string]string{
+	"nameTranslated":  "name_translated",
+	"isMember":        "is_member",
+	"isSearchable":    "is_searchable",
+	"sortKey":         "sort_key",
+	"securityLevelId": "security_level_id",
+}
+
+// hclLabel mirrors the exporter: a reference must be a valid identifier, and a
+// key like "3_aktiv" (from "!3 Aktiv") is not one.
+func hclLabel(key string) string {
+	safe := []rune(key)
+	for i, c := range safe {
+		isOK := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-'
+		if !isOK {
+			safe[i] = '_'
+		}
+	}
+	out := string(safe)
+	if len(out) > 0 && (out[0] == '-' || (out[0] >= '0' && out[0] <= '9')) {
+		return "g_" + out
+	}
+	return out
+}
+
+// TestGolden_Tier0NoOp widens the campus proof to every tier-0 type at the
+// real estate's row distribution (15/13/10/7/5 = 50), including a key that has
+// to be relabelled to be referenceable.
+func TestGolden_Tier0NoOp(t *testing.T) {
+	sf := loadFixture(t, "../../testdata/ct-state.synthetic.tier0.json")
+	if len(sf.Resources) != 50 {
+		t.Fatalf("fixture has %d rows, want 50", len(sf.Resources))
+	}
+
+	mock := testmock.New()
+	defer mock.Close()
+
+	keys := make([]string, 0, len(sf.Resources))
+	for k := range sf.Resources {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var config, imports strings.Builder
+	config.WriteString(providerBlock(mock.URL))
+	relabelled := 0
+	for _, k := range keys {
+		r := sf.Resources[k]
+		collection, ok := tier0Collections[r.Type]
+		if !ok {
+			t.Fatalf("fixture row %q has unmapped type %q", k, r.Type)
+		}
+		mock.Seed(collection, r.ID, cloneRow(r.Fields))
+
+		label := hclLabel(r.Key)
+		if label != r.Key {
+			relabelled++
+		}
+
+		// Deterministic attribute order so the config text is stable.
+		fields := make([]string, 0, len(r.Fields))
+		for f := range r.Fields {
+			fields = append(fields, f)
+		}
+		sort.Strings(fields)
+
+		fmt.Fprintf(&config, "\nresource %q %q {\n", tier0HCLTypes[r.Type], label)
+		for _, f := range fields {
+			name := f
+			if mapped, ok := tier0Attrs[f]; ok {
+				name = mapped
+			}
+			fmt.Fprintf(&config, "  %s = %s\n", name, hclLiteral(r.Fields[f]))
+		}
+		config.WriteString("}\n")
+
+		fmt.Fprintf(&imports, "\nimport {\n  to = %s.%s\n  id = %q\n}\n",
+			tier0HCLTypes[r.Type], label, strconv.Itoa(r.ID))
+	}
+
+	if relabelled == 0 {
+		t.Fatal("fixture must include a key that needs relabelling — that case is the whole point")
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: config.String() + imports.String(), ExpectNonEmptyPlan: false},
+			{Config: config.String(), PlanOnly: true, ExpectNonEmptyPlan: false},
+		},
+	})
+}

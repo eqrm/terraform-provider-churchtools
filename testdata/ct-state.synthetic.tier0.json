@@ -1,0 +1,594 @@
+{
+  "version": 1,
+  "host": "https://example.church.tools",
+  "resources": {
+    "hauptstandort": {
+      "type": "campus",
+      "id": 0,
+      "key": "hauptstandort",
+      "fields": {
+        "name": "Hauptstandort",
+        "shorty": "HS"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "nordstadt": {
+      "type": "campus",
+      "id": 3,
+      "key": "nordstadt",
+      "fields": {
+        "name": "Nordstadt",
+        "shorty": "ND"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "suedstadt": {
+      "type": "campus",
+      "id": 4,
+      "key": "suedstadt",
+      "fields": {
+        "name": "Südstadt",
+        "shorty": "SD"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "weststadt": {
+      "type": "campus",
+      "id": 5,
+      "key": "weststadt",
+      "fields": {
+        "name": "Weststadt",
+        "shorty": "WS"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "oststadt": {
+      "type": "campus",
+      "id": 6,
+      "key": "oststadt",
+      "fields": {
+        "name": "Oststadt",
+        "shorty": "OS"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "altstadt": {
+      "type": "campus",
+      "id": 7,
+      "key": "altstadt",
+      "fields": {
+        "name": "Altstadt",
+        "shorty": "AS"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "neustadt": {
+      "type": "campus",
+      "id": 8,
+      "key": "neustadt",
+      "fields": {
+        "name": "Neustadt",
+        "shorty": "NS"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "seedorf": {
+      "type": "campus",
+      "id": 9,
+      "key": "seedorf",
+      "fields": {
+        "name": "Seedorf",
+        "shorty": "SE"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "bergheim": {
+      "type": "campus",
+      "id": 10,
+      "key": "bergheim",
+      "fields": {
+        "name": "Bergheim",
+        "shorty": "BH"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "talheim": {
+      "type": "campus",
+      "id": 11,
+      "key": "talheim",
+      "fields": {
+        "name": "Talheim",
+        "shorty": "TH"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "waldhof": {
+      "type": "campus",
+      "id": 12,
+      "key": "waldhof",
+      "fields": {
+        "name": "Waldhof",
+        "shorty": "WH"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "feldkirch": {
+      "type": "campus",
+      "id": 13,
+      "key": "feldkirch",
+      "fields": {
+        "name": "Feldkirch",
+        "shorty": "FK"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "steinbach": {
+      "type": "campus",
+      "id": 14,
+      "key": "steinbach",
+      "fields": {
+        "name": "Steinbach",
+        "shorty": "SB"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "rosenau": {
+      "type": "campus",
+      "id": 15,
+      "key": "rosenau",
+      "fields": {
+        "name": "Rosenau",
+        "shorty": "RA"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "lindenhof": {
+      "type": "campus",
+      "id": 16,
+      "key": "lindenhof",
+      "fields": {
+        "name": "Lindenhof",
+        "shorty": "LH"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "team": {
+      "type": "group-type",
+      "id": 20,
+      "key": "team",
+      "fields": {
+        "name": "Team",
+        "nameTranslated": "Team"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "struktur": {
+      "type": "group-type",
+      "id": 21,
+      "key": "struktur",
+      "fields": {
+        "name": "Struktur",
+        "nameTranslated": "Struktur"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "merkmal": {
+      "type": "group-type",
+      "id": 22,
+      "key": "merkmal",
+      "fields": {
+        "name": "Merkmal",
+        "nameTranslated": "Merkmal"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "community": {
+      "type": "group-type",
+      "id": 23,
+      "key": "community",
+      "fields": {
+        "name": "Community",
+        "nameTranslated": "Community"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "dienst": {
+      "type": "group-type",
+      "id": 24,
+      "key": "dienst",
+      "fields": {
+        "name": "Dienst",
+        "nameTranslated": "Dienst"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "kleingruppe": {
+      "type": "group-type",
+      "id": 25,
+      "key": "kleingruppe",
+      "fields": {
+        "name": "Kleingruppe",
+        "nameTranslated": "Kleingruppe"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "newsletter": {
+      "type": "group-type",
+      "id": 26,
+      "key": "newsletter",
+      "fields": {
+        "name": "Newsletter",
+        "nameTranslated": "Newsletter"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "kurs": {
+      "type": "group-type",
+      "id": 27,
+      "key": "kurs",
+      "fields": {
+        "name": "Kurs",
+        "nameTranslated": "Kurs"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "projekt": {
+      "type": "group-type",
+      "id": 28,
+      "key": "projekt",
+      "fields": {
+        "name": "Projekt",
+        "nameTranslated": "Projekt"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gremium": {
+      "type": "group-type",
+      "id": 29,
+      "key": "gremium",
+      "fields": {
+        "name": "Gremium",
+        "nameTranslated": "Gremium"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "netzwerk": {
+      "type": "group-type",
+      "id": 30,
+      "key": "netzwerk",
+      "fields": {
+        "name": "Netzwerk",
+        "nameTranslated": "Netzwerk"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "treffen": {
+      "type": "group-type",
+      "id": 31,
+      "key": "treffen",
+      "fields": {
+        "name": "Treffen",
+        "nameTranslated": "Treffen"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "3_aktiv": {
+      "type": "group-type",
+      "id": 32,
+      "key": "3_aktiv",
+      "fields": {
+        "name": "!3 Aktiv",
+        "nameTranslated": "!3 Aktiv"
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "bereich_musik": {
+      "type": "department",
+      "id": 40,
+      "key": "bereich_musik",
+      "fields": {
+        "name": "Bereich Musik",
+        "shorty": "MU",
+        "sortKey": 0
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "bereich_technik": {
+      "type": "department",
+      "id": 41,
+      "key": "bereich_technik",
+      "fields": {
+        "name": "Bereich Technik",
+        "shorty": "TE",
+        "sortKey": 1
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "bereich_kinder": {
+      "type": "department",
+      "id": 42,
+      "key": "bereich_kinder",
+      "fields": {
+        "name": "Bereich Kinder",
+        "shorty": "KI",
+        "sortKey": 2
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "bereich_jugend": {
+      "type": "department",
+      "id": 43,
+      "key": "bereich_jugend",
+      "fields": {
+        "name": "Bereich Jugend",
+        "shorty": "JU",
+        "sortKey": 3
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "bereich_diakonie": {
+      "type": "department",
+      "id": 44,
+      "key": "bereich_diakonie",
+      "fields": {
+        "name": "Bereich Diakonie",
+        "shorty": "DI",
+        "sortKey": 4
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "bereich_verwaltung": {
+      "type": "department",
+      "id": 45,
+      "key": "bereich_verwaltung",
+      "fields": {
+        "name": "Bereich Verwaltung",
+        "shorty": "VE",
+        "sortKey": 5
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "bereich_mission": {
+      "type": "department",
+      "id": 46,
+      "key": "bereich_mission",
+      "fields": {
+        "name": "Bereich Mission",
+        "shorty": "MI",
+        "sortKey": 6
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "bereich_gebet": {
+      "type": "department",
+      "id": 47,
+      "key": "bereich_gebet",
+      "fields": {
+        "name": "Bereich Gebet",
+        "shorty": "GE",
+        "sortKey": 7
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "bereich_lehre": {
+      "type": "department",
+      "id": 48,
+      "key": "bereich_lehre",
+      "fields": {
+        "name": "Bereich Lehre",
+        "shorty": "LE",
+        "sortKey": 8
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "bereich_medien": {
+      "type": "department",
+      "id": 49,
+      "key": "bereich_medien",
+      "fields": {
+        "name": "Bereich Medien",
+        "shorty": "ME",
+        "sortKey": 9
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "mitglied": {
+      "type": "person-status",
+      "id": 60,
+      "key": "mitglied",
+      "fields": {
+        "name": "Mitglied",
+        "shorty": "M",
+        "isMember": true,
+        "isSearchable": true,
+        "sortKey": 10,
+        "securityLevelId": 1
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gast": {
+      "type": "person-status",
+      "id": 61,
+      "key": "gast",
+      "fields": {
+        "name": "Gast",
+        "shorty": "G",
+        "isMember": false,
+        "isSearchable": true,
+        "sortKey": 20,
+        "securityLevelId": 1
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "freund": {
+      "type": "person-status",
+      "id": 62,
+      "key": "freund",
+      "fields": {
+        "name": "Freund",
+        "shorty": "F",
+        "isMember": false,
+        "isSearchable": true,
+        "sortKey": 30,
+        "securityLevelId": 1
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "ehemalig": {
+      "type": "person-status",
+      "id": 63,
+      "key": "ehemalig",
+      "fields": {
+        "name": "Ehemalig",
+        "shorty": "E",
+        "isMember": false,
+        "isSearchable": false,
+        "sortKey": 40,
+        "securityLevelId": 2
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "taufling": {
+      "type": "person-status",
+      "id": 64,
+      "key": "taufling",
+      "fields": {
+        "name": "Täufling",
+        "shorty": "T",
+        "isMember": false,
+        "isSearchable": true,
+        "sortKey": 50,
+        "securityLevelId": 1
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "mitarbeiter": {
+      "type": "person-status",
+      "id": 65,
+      "key": "mitarbeiter",
+      "fields": {
+        "name": "Mitarbeiter",
+        "shorty": "MA",
+        "isMember": true,
+        "isSearchable": true,
+        "sortKey": 60,
+        "securityLevelId": 2
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "leitung": {
+      "type": "person-status",
+      "id": 66,
+      "key": "leitung",
+      "fields": {
+        "name": "Leitung",
+        "shorty": "L",
+        "isMember": true,
+        "isSearchable": true,
+        "sortKey": 70,
+        "securityLevelId": 3
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "cv_leitung": {
+      "type": "comment-viewer",
+      "id": 70,
+      "key": "cv_leitung",
+      "fields": {
+        "name": "Leitung",
+        "sortKey": 0
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "cv_seelsorge": {
+      "type": "comment-viewer",
+      "id": 71,
+      "key": "cv_seelsorge",
+      "fields": {
+        "name": "Seelsorge",
+        "sortKey": 1
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "cv_verwaltung": {
+      "type": "comment-viewer",
+      "id": 72,
+      "key": "cv_verwaltung",
+      "fields": {
+        "name": "Verwaltung",
+        "sortKey": 2
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "cv_bereichsleitung": {
+      "type": "comment-viewer",
+      "id": 73,
+      "key": "cv_bereichsleitung",
+      "fields": {
+        "name": "Bereichsleitung",
+        "sortKey": 3
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "cv_pastoren": {
+      "type": "comment-viewer",
+      "id": 74,
+      "key": "cv_pastoren",
+      "fields": {
+        "name": "Pastoren",
+        "sortKey": 4
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  }
+}

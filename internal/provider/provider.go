@@ -89,6 +89,10 @@ func (p *churchtoolsProvider) Configure(ctx context.Context, req provider.Config
 func (p *churchtoolsProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewCampusResource,
+		NewGroupTypeResource,
+		NewDepartmentResource,
+		NewPersonStatusResource,
+		NewCommentViewerResource,
 	}
 }
 
