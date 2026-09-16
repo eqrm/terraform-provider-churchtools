@@ -87,7 +87,9 @@ func (p *churchtoolsProvider) Configure(ctx context.Context, req provider.Config
 }
 
 func (p *churchtoolsProvider) Resources(_ context.Context) []func() resource.Resource {
-	return []func() resource.Resource{}
+	return []func() resource.Resource{
+		NewCampusResource,
+	}
 }
 
 func (p *churchtoolsProvider) DataSources(_ context.Context) []func() datasource.DataSource {
