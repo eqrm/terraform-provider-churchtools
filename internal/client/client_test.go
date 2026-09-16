@@ -99,3 +99,42 @@ func TestError_IncludesStatusAndBody(t *testing.T) {
 		t.Errorf("err = %q, want it to mention 422 and the body", err.Error())
 	}
 }
+
+// A 404 on a COLLECTION path means the endpoint does not exist on this
+// instance, not that a row was deleted. Mapping it to ErrNotFound would make
+// every resource of that type silently vanish from state and get re-created on
+// the next apply. Only an item read may translate 404 into ErrNotFound.
+func TestCollection404IsNotErrNotFound(t *testing.T) {
+	always404 := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"message":"no route"}`))
+	})
+
+	c, done := newTestClient(always404)
+	defer done()
+
+	if _, err := c.List(context.Background(), "/departments"); err == nil {
+		t.Fatal("List on a missing endpoint returned nil error")
+	} else if errors.Is(err, ErrNotFound) {
+		t.Errorf("List 404 mapped to ErrNotFound (%v); a missing endpoint must be a hard error", err)
+	}
+
+	// An item read keeps the existing contract: 404 means the row is gone.
+	if _, err := c.Get(context.Background(), "/campuses", "7"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("Get 404 = %v, want ErrNotFound", err)
+	}
+}
+
+// Get("") would hit the collection endpoint and decode an array into a Row,
+// leaving the resource permanently unreadable. Reject it at the boundary.
+func TestGet_EmptyIDIsRejected(t *testing.T) {
+	c, done := newTestClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("Get with an empty id reached the server at %s", r.URL.Path)
+		w.Write([]byte(`{"data":[]}`))
+	}))
+	defer done()
+
+	if _, err := c.Get(context.Background(), "/campuses", ""); err == nil {
+		t.Fatal("Get with empty id returned nil error")
+	}
+}
