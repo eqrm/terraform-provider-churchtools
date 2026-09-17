@@ -1,6 +1,7 @@
 package provider_test
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/eqrm/terraform-provider-churchtools/internal/testmock"
@@ -108,4 +109,44 @@ resource "churchtools_comment_viewer" "leitung" {
 			Check: resource.TestCheckResourceAttr("churchtools_comment_viewer.leitung", "name", "Leitung"),
 		}},
 	})
+}
+
+// A create reply without an id must fail the apply. Storing "" would succeed,
+// then every later call would address the collection instead of a row and the
+// resource could never be read or un-managed again.
+func TestAccTier0_CreateWithoutIDFails(t *testing.T) {
+	for _, tc := range []struct{ name, collection, config string }{
+		{"group_type", "/group/grouptypes", `
+resource "churchtools_group_type" "x" {
+  name            = "Kleingruppe"
+  name_translated = "Kleingruppe"
+}`},
+		{"person_status", "/statuses", `
+resource "churchtools_person_status" "x" {
+  name              = "Mitglied"
+  shorty            = "M"
+  is_member         = true
+  is_searchable     = true
+  sort_key          = 10
+  security_level_id = 1
+}`},
+		{"comment_viewer", "/person/commentviewers", `
+resource "churchtools_comment_viewer" "x" {
+  name = "Leitung"
+}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mock := testmock.New()
+			defer mock.Close()
+			mock.DropCreateID(tc.collection)
+
+			resource.Test(t, resource.TestCase{
+				ProtoV6ProviderFactories: protoV6(),
+				Steps: []resource.TestStep{{
+					Config:      providerBlock(mock.URL) + tc.config,
+					ExpectError: regexp.MustCompile(`keine id zur`),
+				}},
+			})
+		})
+	}
 }

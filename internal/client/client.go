@@ -113,20 +113,48 @@ func (c *Client) doItem(ctx context.Context, method, collection, id string, body
 	return raw, err
 }
 
-// envelope is ChurchTools' universal `{"data": ...}` wrapper.
+// envelope is ChurchTools' universal `{"data": ...}` wrapper. List endpoints
+// additionally carry `meta.pagination`, which MUST be followed: dropping it
+// silently truncates a collection to its first page.
 type envelope struct {
 	Data json.RawMessage `json:"data"`
+	Meta *struct {
+		Pagination *struct {
+			Current  *int `json:"current"`
+			LastPage *int `json:"lastPage"`
+		} `json:"pagination"`
+	} `json:"meta"`
 }
 
 func unwrap(raw []byte, into any) error {
+	_, err := unwrapEnvelope(raw, into)
+	return err
+}
+
+// unwrapEnvelope decodes `data` into `into` and hands back the envelope so a
+// caller can inspect `meta.pagination`.
+func unwrapEnvelope(raw []byte, into any) (envelope, error) {
 	var env envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return fmt.Errorf("churchtools: decoding response envelope: %w", err)
+		return env, fmt.Errorf("churchtools: decoding response envelope: %w", err)
 	}
 	if len(env.Data) == 0 {
-		return nil
+		return env, nil
 	}
-	return json.Unmarshal(env.Data, into)
+	return env, json.Unmarshal(env.Data, into)
+}
+
+// morePages reports whether the envelope says further pages exist. No
+// pagination block at all means the endpoint is not a paged list.
+func (e envelope) morePages(page int) bool {
+	if e.Meta == nil || e.Meta.Pagination == nil {
+		return false
+	}
+	p := e.Meta.Pagination
+	if p.Current == nil || p.LastPage == nil {
+		return false
+	}
+	return *p.Current < *p.LastPage
 }
 
 // doWithCookie is do() plus the session cookie. The CSRF read needs the cookie

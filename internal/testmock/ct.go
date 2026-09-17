@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,10 +19,13 @@ type Server struct {
 	mu     sync.Mutex
 	rows   map[string]map[string]any // collection -> id -> row
 	nextID int
+	// dropCreateID makes POST answer without an `id`, reproducing a CT reply
+	// the provider must refuse rather than store as "".
+	dropCreateID map[string]bool
 }
 
 func New() *Server {
-	s := &Server{rows: map[string]map[string]any{}, nextID: 1000}
+	s := &Server{rows: map[string]map[string]any{}, nextID: 1000, dropCreateID: map[string]bool{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
 	return s
 }
@@ -36,6 +40,13 @@ func (s *Server) Seed(collection string, id int, row map[string]any) {
 	}
 	row["id"] = float64(id)
 	s.rows[collection][strconv.Itoa(id)] = row
+}
+
+// DropCreateID makes this collection's POST answer omit the id.
+func (s *Server) DropCreateID(collection string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dropCreateID[collection] = true
 }
 
 // Find returns the first row in a collection whose `field` equals `value`, so
@@ -174,11 +185,39 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case r.Method == http.MethodGet && id == "":
-		list := []any{}
-		for _, v := range s.rows[collection] {
-			list = append(list, v)
+		// Ordered by id so paging is deterministic; CT pages list endpoints and
+		// reports progress in meta.pagination, so the mock must too -- otherwise
+		// a client that reads only page 1 still looks correct here.
+		ids := make([]int, 0, len(s.rows[collection]))
+		for k := range s.rows[collection] {
+			n, _ := strconv.Atoi(k)
+			ids = append(ids, n)
 		}
-		writeData(w, list)
+		sort.Ints(ids)
+
+		page, limit := pageParams(r)
+		lastPage := 1
+		if limit > 0 {
+			lastPage = (len(ids) + limit - 1) / limit
+			if lastPage == 0 {
+				lastPage = 1
+			}
+		}
+		lo := (page - 1) * limit
+		hi := lo + limit
+		if lo > len(ids) {
+			lo = len(ids)
+		}
+		if hi > len(ids) {
+			hi = len(ids)
+		}
+		list := []any{}
+		for _, n := range ids[lo:hi] {
+			list = append(list, s.rows[collection][strconv.Itoa(n)])
+		}
+		writeDataMeta(w, list, map[string]any{
+			"pagination": map[string]any{"current": page, "lastPage": lastPage},
+		})
 	case r.Method == http.MethodGet:
 		row, ok := s.rows[collection][id]
 		if !ok {
@@ -192,6 +231,16 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.nextID++
 		body["id"] = float64(s.nextID)
 		s.rows[collection][strconv.Itoa(s.nextID)] = body
+		if s.dropCreateID[collection] {
+			reply := map[string]any{}
+			for k, v := range body {
+				if k != "id" {
+					reply[k] = v
+				}
+			}
+			writeData(w, reply)
+			return
+		}
 		writeData(w, body)
 	case r.Method == http.MethodPut || r.Method == http.MethodPatch:
 		row, ok := s.rows[collection][id]
@@ -212,6 +261,24 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// pageParams reads CT's ?page=&limit= pair, defaulting to one big page.
+func pageParams(r *http.Request) (page, limit int) {
+	page, _ = strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit < 1 {
+		limit = 1000
+	}
+	return page, limit
+}
+
+func writeDataMeta(w http.ResponseWriter, v any, meta map[string]any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"data": v, "meta": meta})
 }
 
 func writeData(w http.ResponseWriter, v any) {

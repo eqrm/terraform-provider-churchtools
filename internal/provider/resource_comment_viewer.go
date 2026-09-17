@@ -70,7 +70,12 @@ func (r *LCommentViewerResource) Create(ctx context.Context, req resource.Create
 		resp.Diagnostics.AddError("Anlegen fehlgeschlagen", err.Error())
 		return
 	}
-	plan.ID = types.StringValue(idString(row["id"]))
+	id, err := requireID(row)
+	if err != nil {
+		resp.Diagnostics.AddError("Kommentar-Sichtbarkeit konnte nicht angelegt werden", err.Error())
+		return
+	}
+	plan.ID = types.StringValue(id)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 

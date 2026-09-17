@@ -1,6 +1,7 @@
 package provider_test
 
 import (
+	"fmt"
 	"regexp"
 	"testing"
 
@@ -89,6 +90,34 @@ func TestAccDepartment_RefusesDuplicateName(t *testing.T) {
 resource "churchtools_department" "musik" {
   name   = "Bereich Musik"
   shorty = "MU"
+}`,
+			ExpectError: regexp.MustCompile(`Bereich existiert bereits`),
+		}},
+	})
+}
+
+// The duplicate-name guard filters GET /departments, which CT pages. If List
+// stops at page 1 the guard never sees a Bereich that sits further down, passes,
+// and SaveMasterData writes a SECOND Bereich with the same name -- the exact
+// corruption the guard exists to prevent. Seed well past one page and put the
+// clashing name last.
+func TestAccDepartment_RefusesDuplicateBeyondFirstPage(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	for i := 1; i <= 250; i++ {
+		mock.Seed("/departments", i, map[string]any{
+			"name": fmt.Sprintf("Bereich %d", i), "shorty": "B", "sortKey": float64(0),
+		})
+	}
+	mock.Seed("/departments", 900, map[string]any{"name": "Bereich Technik", "shorty": "TE", "sortKey": float64(0)})
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{{
+			Config: providerBlock(mock.URL) + `
+resource "churchtools_department" "technik" {
+  name   = "Bereich Technik"
+  shorty = "TE"
 }`,
 			ExpectError: regexp.MustCompile(`Bereich existiert bereits`),
 		}},

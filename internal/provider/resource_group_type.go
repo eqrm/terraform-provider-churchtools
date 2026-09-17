@@ -95,7 +95,12 @@ func (r *groupTypeResource) Create(ctx context.Context, req resource.CreateReque
 		resp.Diagnostics.AddError("Gruppentyp konnte nicht angelegt werden", err.Error())
 		return
 	}
-	plan.ID = types.StringValue(idString(row["id"]))
+	id, err := requireID(row)
+	if err != nil {
+		resp.Diagnostics.AddError("Gruppentyp konnte nicht angelegt werden", err.Error())
+		return
+	}
+	plan.ID = types.StringValue(id)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 

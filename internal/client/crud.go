@@ -2,19 +2,49 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strings"
 )
 
+// listPageSize is the `limit` sent with every page request, and maxListPages is
+// a hard stop so a malformed pagination block cannot loop forever.
+const (
+	listPageSize = 100
+	maxListPages = 500
+)
+
+// List reads a whole collection, following CT's `meta.pagination` across pages.
+// Reading only page 1 would silently truncate the collection -- departments
+// resolve their id by filtering this list, so a short read lets the
+// duplicate-name guard pass and writes a second Bereich of the same name.
 func (c *Client) List(ctx context.Context, collection string) ([]Row, error) {
-	raw, err := c.do(ctx, http.MethodGet, collection, nil)
-	if err != nil {
-		return nil, err
+	var all []Row
+	for page := 1; page <= maxListPages; page++ {
+		raw, err := c.do(ctx, http.MethodGet, pagedPath(collection, page, listPageSize), nil)
+		if err != nil {
+			return nil, err
+		}
+		var rows []Row
+		env, err := unwrapEnvelope(raw, &rows)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, rows...)
+		if !env.morePages(page) {
+			return all, nil
+		}
 	}
-	var rows []Row
-	if err := unwrap(raw, &rows); err != nil {
-		return nil, err
+	return nil, fmt.Errorf("churchtools: %s reported more than %d pages; refusing to keep paging",
+		collection, maxListPages)
+}
+
+func pagedPath(collection string, page, limit int) string {
+	sep := "?"
+	if strings.Contains(collection, "?") {
+		sep = "&"
 	}
-	return rows, nil
+	return fmt.Sprintf("%s%spage=%d&limit=%d", collection, sep, page, limit)
 }
 
 // Get fetches one row. `id` is a string because Terraform import ids are
