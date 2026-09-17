@@ -48,6 +48,11 @@ type Client struct {
 	baseURL string
 	token   string
 	http    *http.Client
+
+	// Legacy-endpoint session (see session.go). Acquired lazily: a run that
+	// only touches REST resources never performs the handshake.
+	cookie    string
+	csrfToken string
 }
 
 func New(baseURL, token string) *Client {
@@ -122,4 +127,31 @@ func unwrap(raw []byte, into any) error {
 		return nil
 	}
 	return json.Unmarshal(env.Data, into)
+}
+
+// doWithCookie is do() plus the session cookie. The CSRF read needs the cookie
+// from the whoami step, and that step is the only thing that can set it.
+func (c *Client) doWithCookie(ctx context.Context, method, path string, body any) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+"/api"+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Login "+c.token)
+	req.Header.Set("Accept", "application/json")
+	if c.cookie != "" {
+		req.Header.Set("Cookie", c.cookie)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, fmt.Errorf("churchtools: %s %s returned %d: %s", method, path, resp.StatusCode, string(raw))
+	}
+	return raw, nil
 }

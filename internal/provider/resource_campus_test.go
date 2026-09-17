@@ -3,6 +3,7 @@ package provider_test
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/eqrm/terraform-provider-churchtools/internal/provider"
@@ -104,12 +105,47 @@ func TestMockRejectsUnregisteredCollection(t *testing.T) {
 	mock := testmock.New()
 	defer mock.Close()
 
-	resp, err := http.Get(mock.URL + "/api/departments")
+	// /persons is outside this tool's mandate and will never be registered.
+	// (This used to probe /api/departments, which is now a registered
+	// READ-ONLY collection — see TestMockRefusesDepartmentWrites.)
+	resp, err := http.Get(mock.URL + "/api/persons")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("unregistered collection returned %d, want 404", resp.StatusCode)
+	}
+}
+
+// ChurchTools serves no REST write for Bereiche — every write goes through the
+// legacy master-data endpoint. The mock must refuse POST/PUT on /departments,
+// or a resource built on the wrong verbs goes green in CI again.
+func TestMockRefusesDepartmentWrites(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		req, err := http.NewRequest(method, mock.URL+"/api/departments/1", strings.NewReader("{}"))
+		if err != nil {
+			t.Fatalf("NewRequest: %v", err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", method, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("%s /departments returned %d, want 405", method, resp.StatusCode)
+		}
+	}
+
+	resp, err := http.Get(mock.URL + "/api/departments")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("GET /departments returned %d, want 200 — reads are REST", resp.StatusCode)
 	}
 }
