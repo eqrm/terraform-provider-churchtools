@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/eqrm/terraform-provider-churchtools/internal/testmock"
 )
 
 func newTestClient(h http.Handler) (*Client, func()) {
@@ -188,5 +191,33 @@ func TestList_UnpagedEndpointReadsOnce(t *testing.T) {
 	}
 	if len(rows) != 1 || calls != 1 {
 		t.Errorf("rows=%d calls=%d, want 1 and 1", len(rows), calls)
+	}
+}
+
+// One *client.Client is shared by every resource and Terraform applies
+// resources concurrently, so the lazy legacy-session handshake runs from
+// several goroutines at once. Guard it: before the mutex this raced on
+// c.cookie/c.csrfToken under -race.
+func TestSession_ConcurrentHandshakeIsSafe(t *testing.T) {
+	ct := testmock.New()
+	defer ct.Close()
+
+	c := New(ct.URL, "tok")
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := c.SaveMasterData(context.Background(), DepartmentTable,
+				map[string]any{"bezeichnung": "Bereich", "kuerzel": "B", "sortkey": 0}, nil); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("concurrent SaveMasterData: %v", err)
 	}
 }

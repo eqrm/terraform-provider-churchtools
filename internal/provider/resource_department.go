@@ -9,7 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -64,17 +64,21 @@ func (r *departmentResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			},
 			"name":   schema.StringAttribute{Required: true},
 			"shorty": schema.StringAttribute{Required: true},
-			// ct-cli stores this as `sortKey ?? 0`; matching that keeps an
-			// exported resource that omits it a no-op rather than a diff.
+			// Optional+Computed with NO static default: a config that omits
+			// sort_key keeps whatever ChurchTools already has. A StaticInt64(0)
+			// default would instead rewrite an imported row's real sortKey (say
+			// 30) down to 0 on the next apply, reordering the list instance-wide.
+			// New rows still get 0, which is ct-cli's `sortKey ?? 0`.
 			"sort_key": schema.Int64Attribute{
-				Optional: true, Computed: true, Default: int64default.StaticInt64(0),
+				Optional: true, Computed: true,
+				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
 			},
 		},
 	}
 }
 
 func (r *departmentResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	r.client = configureClient(req, resp)
+	r.client = configureClient(req, resp, r.client)
 }
 
 func (r *departmentResource) legacyRow(m departmentModel) map[string]any {
@@ -104,6 +108,12 @@ func (r *departmentResource) Create(ctx context.Context, req resource.CreateRequ
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
+	}
+	// sort_key is Optional+Computed with no static default, so an omitted value
+	// arrives unknown. A NEW row gets ct-cli's `sortKey ?? 0`; the absence of a
+	// default is what stops an existing row's real sortKey being reset to 0.
+	if plan.SortKey.IsUnknown() || plan.SortKey.IsNull() {
+		plan.SortKey = types.Int64Value(0)
 	}
 
 	before, err := r.client.List(ctx, departmentCollection)

@@ -54,7 +54,7 @@ func (r *personStatusResource) Schema(_ context.Context, _ resource.SchemaReques
 }
 
 func (r *personStatusResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	r.client = configureClient(req, resp)
+	r.client = configureClient(req, resp, r.client)
 }
 
 func (r *personStatusResource) managed(m personStatusModel) client.Row {

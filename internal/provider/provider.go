@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/eqrm/terraform-provider-churchtools/internal/client"
+
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
@@ -23,9 +25,15 @@ type churchtoolsProvider struct {
 }
 
 // ProviderData is handed to every resource's Configure.
+//
+// It carries ONE shared *client.Client on purpose. The framework builds a fresh
+// resource per RPC and calls Configure each time, so a client constructed in
+// configureClient would be thrown away after every call -- and with it the
+// legacy session, making each department write pay whoami + csrftoken again.
 type ProviderData struct {
-	Host  string
-	Token string
+	Host   string
+	Token  string
+	Client *client.Client
 }
 
 type providerModel struct {
@@ -81,7 +89,11 @@ func (p *churchtoolsProvider) Configure(ctx context.Context, req provider.Config
 		return
 	}
 
-	data := &ProviderData{Host: cfg.Host.ValueString(), Token: cfg.Token.ValueString()}
+	data := &ProviderData{
+		Host:   cfg.Host.ValueString(),
+		Token:  cfg.Token.ValueString(),
+		Client: client.New(cfg.Host.ValueString(), cfg.Token.ValueString()),
+	}
 	resp.ResourceData = data
 	resp.DataSourceData = data
 }

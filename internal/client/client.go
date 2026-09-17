@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -51,6 +52,11 @@ type Client struct {
 
 	// Legacy-endpoint session (see session.go). Acquired lazily: a run that
 	// only touches REST resources never performs the handshake.
+	//
+	// One Client is shared by every resource (see provider.ProviderData) and
+	// Terraform applies resources concurrently, so these two fields are written
+	// from several goroutines and need the mutex.
+	sessionMu sync.Mutex
 	cookie    string
 	csrfToken string
 }
@@ -159,7 +165,9 @@ func (e envelope) morePages(page int) bool {
 
 // doWithCookie is do() plus the session cookie. The CSRF read needs the cookie
 // from the whoami step, and that step is the only thing that can set it.
-func (c *Client) doWithCookie(ctx context.Context, method, path string, body any) ([]byte, error) {
+// doWithCookie is a GET-style read that carries the session cookie. It sends no
+// body: the only call that needs one goes through AjaxJSON.
+func (c *Client) doWithCookie(ctx context.Context, method, path string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+"/api"+path, nil)
 	if err != nil {
 		return nil, err

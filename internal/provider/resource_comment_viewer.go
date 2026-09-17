@@ -8,29 +8,29 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-const LCommentViewerCollection = "/person/commentviewers"
+const commentViewerCollection = "/person/commentviewers"
 
-type LCommentViewerResource struct{ client *client.Client }
+type commentViewerResource struct{ client *client.Client }
 
-type LCommentViewerModel struct {
+type commentViewerModel struct {
 	ID      types.String `tfsdk:"id"`
 	Name    types.String `tfsdk:"name"`
 	SortKey types.Int64  `tfsdk:"sort_key"`
 }
 
-func NewCommentViewerResource() resource.Resource { return &LCommentViewerResource{} }
+func NewCommentViewerResource() resource.Resource { return &commentViewerResource{} }
 
-func (r *LCommentViewerResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
+func (r *commentViewerResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_comment_viewer"
 }
 
-func (r *LCommentViewerResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *commentViewerResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Eine ChurchTools Kommentar-Sichtbarkeit.",
 		Attributes: map[string]schema.Attribute{
@@ -39,33 +39,42 @@ func (r *LCommentViewerResource) Schema(_ context.Context, _ resource.SchemaRequ
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"name": schema.StringAttribute{Required: true},
-			// ct-cli stores this as `sortKey ?? 0`; matching that keeps an
-			// exported resource that omits it a no-op rather than a diff.
+			// Optional+Computed with NO static default: a config that omits
+			// sort_key keeps whatever ChurchTools already has. A StaticInt64(0)
+			// default would instead rewrite an imported row's real sortKey (say
+			// 30) down to 0 on the next apply, reordering the list instance-wide.
+			// New rows still get 0, which is ct-cli's `sortKey ?? 0`.
 			"sort_key": schema.Int64Attribute{
-				Optional: true, Computed: true, Default: int64default.StaticInt64(0),
+				Optional: true, Computed: true,
+				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
 			},
 		},
 	}
 }
 
-func (r *LCommentViewerResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	r.client = configureClient(req, resp)
+func (r *commentViewerResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
+	r.client = configureClient(req, resp, r.client)
 }
 
-func (r *LCommentViewerResource) managed(m LCommentViewerModel) client.Row {
+func (r *commentViewerResource) managed(m commentViewerModel) client.Row {
 	return client.Row{
 		"name":    m.Name.ValueString(),
 		"sortKey": m.SortKey.ValueInt64(),
 	}
 }
 
-func (r *LCommentViewerResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
-	var plan LCommentViewerModel
+func (r *commentViewerResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var plan commentViewerModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	row, err := r.client.Create(ctx, LCommentViewerCollection, r.managed(plan))
+	// See resource_department.go: omitted sort_key arrives unknown, and a NEW
+	// row gets ct-cli's `sortKey ?? 0`.
+	if plan.SortKey.IsUnknown() || plan.SortKey.IsNull() {
+		plan.SortKey = types.Int64Value(0)
+	}
+	row, err := r.client.Create(ctx, commentViewerCollection, r.managed(plan))
 	if err != nil {
 		resp.Diagnostics.AddError("Anlegen fehlgeschlagen", err.Error())
 		return
@@ -79,13 +88,13 @@ func (r *LCommentViewerResource) Create(ctx context.Context, req resource.Create
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
-func (r *LCommentViewerResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
-	var state LCommentViewerModel
+func (r *commentViewerResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var state commentViewerModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	row, err := r.client.Get(ctx, LCommentViewerCollection, state.ID.ValueString())
+	row, err := r.client.Get(ctx, commentViewerCollection, state.ID.ValueString())
 	if errors.Is(err, client.ErrNotFound) {
 		resp.State.RemoveResource(ctx)
 		return
@@ -99,25 +108,25 @@ func (r *LCommentViewerResource) Read(ctx context.Context, req resource.ReadRequ
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }
 
-func (r *LCommentViewerResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
-	var plan, state LCommentViewerModel
+func (r *commentViewerResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan, state commentViewerModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 	plan.ID = state.ID
-	if _, err := r.client.Update(ctx, LCommentViewerCollection, state.ID.ValueString(), "PUT", r.managed(plan)); err != nil {
+	if _, err := r.client.Update(ctx, commentViewerCollection, state.ID.ValueString(), "PUT", r.managed(plan)); err != nil {
 		resp.Diagnostics.AddError("Aktualisieren fehlgeschlagen", err.Error())
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
-func (r *LCommentViewerResource) Delete(_ context.Context, _ resource.DeleteRequest, resp *resource.DeleteResponse) {
+func (r *commentViewerResource) Delete(_ context.Context, _ resource.DeleteRequest, resp *resource.DeleteResponse) {
 	resp.Diagnostics.AddWarning(orphanOnDeleteSummary, orphanOnDeleteDetail("Kommentar-Sichtbarkeiten"))
 }
 
-func (r *LCommentViewerResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+func (r *commentViewerResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }

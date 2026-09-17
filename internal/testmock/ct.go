@@ -125,6 +125,12 @@ var supportedVerbs = map[string]map[string]bool{
 	"/csrftoken": {http.MethodGet: true},
 }
 
+// collectionOnly lists collections CT serves ONLY as a whole: there is no
+// GET /<collection>/{id}. Departments are the case that started this -- a Read
+// that addresses one Bereich by id 404s on a live instance, and the resource
+// must filter the collection instead.
+var collectionOnly = map[string]bool{"/departments": true}
+
 // legacyPath is CT's non-REST endpoint, outside /api entirely.
 const legacyPath = "/index.php"
 
@@ -138,6 +144,30 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	collection, id := splitPath(r.URL.Path)
+
+	verbs, known := supportedVerbs[collection]
+	if !known {
+		w.WriteHeader(http.StatusNotFound)
+		writeData(w, map[string]any{
+			"message": "unknown collection " + collection +
+				" -- register it in testmock.supportedVerbs with the verbs a live instance supports",
+		})
+		return
+	}
+	if !verbs[r.Method] {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		writeData(w, map[string]any{
+			"message": "ChurchTools serves no " + r.Method + " on " + collection,
+		})
+		return
+	}
+	if id != "" && collectionOnly[collection] {
+		w.WriteHeader(http.StatusNotFound)
+		writeData(w, map[string]any{
+			"message": "ChurchTools serves no " + collection + "/{id} -- filter the collection instead",
+		})
+		return
+	}
 
 	switch collection {
 	case "/whoami":
@@ -159,23 +189,6 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeData(w, "csrf-test-token")
-		return
-	}
-
-	verbs, known := supportedVerbs[collection]
-	if !known {
-		w.WriteHeader(http.StatusNotFound)
-		writeData(w, map[string]any{
-			"message": "unknown collection " + collection +
-				" -- register it in testmock.supportedVerbs with the verbs a live instance supports",
-		})
-		return
-	}
-	if !verbs[r.Method] {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		writeData(w, map[string]any{
-			"message": "ChurchTools serves no " + r.Method + " on " + collection,
-		})
 		return
 	}
 

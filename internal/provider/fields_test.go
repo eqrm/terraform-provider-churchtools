@@ -38,3 +38,28 @@ func TestRequireID(t *testing.T) {
 		})
 	}
 }
+
+// Parity with ct-cli's truncatePadded (registry.ts): pad by repeating the value,
+// or "x" when it is empty, then truncate. Padding with '.' would leave a stray
+// dot in the ChurchTools UI on every short group-type name.
+func TestTruncatePadded(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		in       string
+		max, pad int
+		want     string
+	}{
+		{"single char pads by repeat", "A", 32, 2, "AA"},
+		{"empty pads with x", "", 32, 2, "xx"},
+		{"empty pads with x to one", "", 32, 1, "x"},
+		{"long enough is untouched", "Kleingruppe", 32, 2, "Kleingruppe"},
+		{"truncates past max", "Kleingruppe", 5, 2, "Klein"},
+		{"repeat then truncate", "AB", 3, 4, "ABA"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := truncatePadded(tc.in, tc.max, tc.pad); got != tc.want {
+				t.Errorf("truncatePadded(%q, %d, %d) = %q, want %q", tc.in, tc.max, tc.pad, got, tc.want)
+			}
+		})
+	}
+}

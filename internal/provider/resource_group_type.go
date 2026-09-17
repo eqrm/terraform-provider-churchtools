@@ -44,7 +44,7 @@ func (r *groupTypeResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 }
 
 func (r *groupTypeResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	r.client = configureClient(req, resp)
+	r.client = configureClient(req, resp, r.client)
 }
 
 // groupTypeCreateDefaults mirrors ct-cli's registry `createDefaults`.
@@ -65,13 +65,22 @@ func groupTypeCreateDefaults(name string) client.Row {
 
 // truncatePadded clips `name` to `max` runes and pads short names with trailing
 // dots so ChurchTools' minimum-length validation passes.
+// truncatePadded mirrors ct-cli's helper of the same name (registry.ts): pad up
+// to `pad` by REPEATING the value (or "x" when it is empty), then truncate to
+// `max`. Padding with '.' instead would put a stray dot in the ChurchTools UI
+// on every group type whose name is shorter than the field's minimum.
 func truncatePadded(name string, max, pad int) string {
-	runes := []rune(name)
+	padded := name
+	for len([]rune(padded)) < pad {
+		if name == "" {
+			padded += "x"
+			continue
+		}
+		padded += name
+	}
+	runes := []rune(padded)
 	if len(runes) > max {
 		return string(runes[:max])
-	}
-	for len(runes) < pad {
-		runes = append(runes, '.')
 	}
 	return string(runes)
 }

@@ -50,7 +50,7 @@ func (r *campusResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 }
 
 func (r *campusResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	r.client = configureClient(req, resp)
+	r.client = configureClient(req, resp, r.client)
 }
 
 func (r *campusResource) body(m campusModel) client.Row {

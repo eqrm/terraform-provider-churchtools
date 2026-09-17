@@ -2,11 +2,14 @@ package provider_test
 
 import (
 	"fmt"
+	"net/http"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/eqrm/terraform-provider-churchtools/internal/testmock"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 // A Bereich create must go through the LEGACY master-data endpoint and then
@@ -120,6 +123,82 @@ resource "churchtools_department" "technik" {
   shorty = "TE"
 }`,
 			ExpectError: regexp.MustCompile(`Bereich existiert bereits`),
+		}},
+	})
+}
+
+// The bug this whole resource was rewritten for: Read used GET /departments/{id},
+// which does not exist on a live instance. The mock now refuses it, so a
+// regression back to an item read fails here instead of on a customer's server.
+func TestMockRefusesDepartmentItemRead(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	mock.Seed("/departments", 3, map[string]any{"name": "Bereich Musik"})
+
+	resp, err := http.Get(mock.URL + "/api/departments/3")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("GET /departments/3 returned %d, want 404", resp.StatusCode)
+	}
+
+	// The collection read must still work — it is the only read path.
+	list, err := http.Get(mock.URL + "/api/departments")
+	if err != nil {
+		t.Fatalf("GET collection: %v", err)
+	}
+	defer list.Body.Close()
+	if list.StatusCode != http.StatusOK {
+		t.Errorf("GET /departments returned %d, want 200", list.StatusCode)
+	}
+}
+
+// POST /departments must be refused: Bereiche have no REST write path.
+func TestMockRefusesDepartmentRestWrite(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+
+	resp, err := http.Post(mock.URL+"/api/departments", "application/json", strings.NewReader(`{"name":"X"}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("POST /departments returned %d, want 405", resp.StatusCode)
+	}
+}
+
+// A config that omits sort_key must not rewrite an existing row's real value.
+// With a StaticInt64(0) default, importing a Bereich whose sortKey is 30 and
+// leaving sort_key out of the HCL rewrote it to 0 on the next apply, reordering
+// the Bereich list instance-wide.
+func TestAccDepartment_ImportKeepsSortKeyWhenOmitted(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	mock.Seed("/departments", 3, map[string]any{"name": "Bereich Musik", "shorty": "MU", "sortKey": float64(30)})
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{{
+			Config: providerBlock(mock.URL) + `
+resource "churchtools_department" "musik" {
+  name   = "Bereich Musik"
+  shorty = "MU"
+}`,
+			ResourceName:  "churchtools_department.musik",
+			ImportState:   true,
+			ImportStateId: "3",
+			ImportStateCheck: func(states []*terraform.InstanceState) error {
+				if len(states) != 1 {
+					return fmt.Errorf("imported %d states, want 1", len(states))
+				}
+				if got := states[0].Attributes["sort_key"]; got != "30" {
+					return fmt.Errorf("sort_key = %q after import, want 30", got)
+				}
+				return nil
+			},
 		}},
 	})
 }
