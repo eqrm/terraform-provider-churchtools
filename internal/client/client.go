@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -48,6 +49,16 @@ type Client struct {
 	baseURL string
 	token   string
 	http    *http.Client
+
+	// Legacy-endpoint session (see session.go). Acquired lazily: a run that
+	// only touches REST resources never performs the handshake.
+	//
+	// One Client is shared by every resource (see provider.ProviderData) and
+	// Terraform applies resources concurrently, so these two fields are written
+	// from several goroutines and need the mutex.
+	sessionMu sync.Mutex
+	cookie    string
+	csrfToken string
 }
 
 func New(baseURL, token string) *Client {
@@ -108,18 +119,75 @@ func (c *Client) doItem(ctx context.Context, method, collection, id string, body
 	return raw, err
 }
 
-// envelope is ChurchTools' universal `{"data": ...}` wrapper.
+// envelope is ChurchTools' universal `{"data": ...}` wrapper. List endpoints
+// additionally carry `meta.pagination`, which MUST be followed: dropping it
+// silently truncates a collection to its first page.
 type envelope struct {
 	Data json.RawMessage `json:"data"`
+	Meta *struct {
+		Pagination *struct {
+			Current  *int `json:"current"`
+			LastPage *int `json:"lastPage"`
+		} `json:"pagination"`
+	} `json:"meta"`
 }
 
 func unwrap(raw []byte, into any) error {
+	_, err := unwrapEnvelope(raw, into)
+	return err
+}
+
+// unwrapEnvelope decodes `data` into `into` and hands back the envelope so a
+// caller can inspect `meta.pagination`.
+func unwrapEnvelope(raw []byte, into any) (envelope, error) {
 	var env envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return fmt.Errorf("churchtools: decoding response envelope: %w", err)
+		return env, fmt.Errorf("churchtools: decoding response envelope: %w", err)
 	}
 	if len(env.Data) == 0 {
-		return nil
+		return env, nil
 	}
-	return json.Unmarshal(env.Data, into)
+	return env, json.Unmarshal(env.Data, into)
+}
+
+// morePages reports whether the envelope says further pages exist. No
+// pagination block at all means the endpoint is not a paged list.
+func (e envelope) morePages(page int) bool {
+	if e.Meta == nil || e.Meta.Pagination == nil {
+		return false
+	}
+	p := e.Meta.Pagination
+	if p.Current == nil || p.LastPage == nil {
+		return false
+	}
+	return *p.Current < *p.LastPage
+}
+
+// doWithCookie is do() plus the session cookie. The CSRF read needs the cookie
+// from the whoami step, and that step is the only thing that can set it.
+// doWithCookie is a GET-style read that carries the session cookie. It sends no
+// body: the only call that needs one goes through AjaxJSON.
+func (c *Client) doWithCookie(ctx context.Context, method, path string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+"/api"+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Login "+c.token)
+	req.Header.Set("Accept", "application/json")
+	if c.cookie != "" {
+		req.Header.Set("Cookie", c.cookie)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, fmt.Errorf("churchtools: %s %s returned %d: %s", method, path, resp.StatusCode, string(raw))
+	}
+	return raw, nil
 }

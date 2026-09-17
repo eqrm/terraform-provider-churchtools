@@ -5,8 +5,10 @@ package testmock
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,10 +19,13 @@ type Server struct {
 	mu     sync.Mutex
 	rows   map[string]map[string]any // collection -> id -> row
 	nextID int
+	// dropCreateID makes POST answer without an `id`, reproducing a CT reply
+	// the provider must refuse rather than store as "".
+	dropCreateID map[string]bool
 }
 
 func New() *Server {
-	s := &Server{rows: map[string]map[string]any{}, nextID: 1000}
+	s := &Server{rows: map[string]map[string]any{}, nextID: 1000, dropCreateID: map[string]bool{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
 	return s
 }
@@ -35,6 +40,13 @@ func (s *Server) Seed(collection string, id int, row map[string]any) {
 	}
 	row["id"] = float64(id)
 	s.rows[collection][strconv.Itoa(id)] = row
+}
+
+// DropCreateID makes this collection's POST answer omit the id.
+func (s *Server) DropCreateID(collection string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dropCreateID[collection] = true
 }
 
 // Find returns the first row in a collection whose `field` equals `value`, so
@@ -86,11 +98,50 @@ var supportedVerbs = map[string]map[string]bool{
 		http.MethodPut:    true,
 		http.MethodDelete: true,
 	},
+	"/group/grouptypes": {
+		http.MethodGet:  true,
+		http.MethodPost: true,
+		http.MethodPut:  true,
+	},
+	"/statuses": {
+		http.MethodGet:  true,
+		http.MethodPost: true,
+		http.MethodPut:  true,
+	},
+	"/person/commentviewers": {
+		http.MethodGet:  true,
+		http.MethodPost: true,
+		http.MethodPut:  true,
+	},
+	// Bereiche are READ-ONLY over REST, and there is no GET by id either: CT
+	// serves the collection and nothing else. Every write goes through the
+	// legacy master-data endpoint below. Registering POST/PUT here would
+	// re-open exactly the hole this table was added to close.
+	"/departments": {
+		http.MethodGet: true,
+	},
+	// The session handshake the legacy endpoint requires.
+	"/whoami":    {http.MethodGet: true},
+	"/csrftoken": {http.MethodGet: true},
 }
+
+// collectionOnly lists collections CT serves ONLY as a whole: there is no
+// GET /<collection>/{id}. Departments are the case that started this -- a Read
+// that addresses one Bereich by id 404s on a live instance, and the resource
+// must filter the collection instead.
+var collectionOnly = map[string]bool{"/departments": true}
+
+// legacyPath is CT's non-REST endpoint, outside /api entirely.
+const legacyPath = "/index.php"
 
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if r.URL.Path == legacyPath {
+		s.handleLegacy(w, r)
+		return
+	}
 
 	collection, id := splitPath(r.URL.Path)
 
@@ -110,6 +161,36 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if id != "" && collectionOnly[collection] {
+		w.WriteHeader(http.StatusNotFound)
+		writeData(w, map[string]any{
+			"message": "ChurchTools serves no " + collection + "/{id} -- filter the collection instead",
+		})
+		return
+	}
+
+	switch collection {
+	case "/whoami":
+		// The handshake that buys the session cookie. ct-cli records that the
+		// login_token must arrive as a QUERY PARAM: an Authorization header
+		// yields a null CSRF token on a live instance.
+		if r.URL.Query().Get("login_token") == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			writeData(w, map[string]any{"message": "login_token query param required"})
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: "ChurchTools_ct", Value: "session-" + strconv.Itoa(s.nextID)})
+		writeData(w, map[string]any{"id": 1, "firstName": "Test"})
+		return
+	case "/csrftoken":
+		if r.Header.Get("Cookie") == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			writeData(w, map[string]any{"message": "no session cookie"})
+			return
+		}
+		writeData(w, "csrf-test-token")
+		return
+	}
 
 	if s.rows[collection] == nil {
 		s.rows[collection] = map[string]any{}
@@ -117,11 +198,39 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case r.Method == http.MethodGet && id == "":
-		list := []any{}
-		for _, v := range s.rows[collection] {
-			list = append(list, v)
+		// Ordered by id so paging is deterministic; CT pages list endpoints and
+		// reports progress in meta.pagination, so the mock must too -- otherwise
+		// a client that reads only page 1 still looks correct here.
+		ids := make([]int, 0, len(s.rows[collection]))
+		for k := range s.rows[collection] {
+			n, _ := strconv.Atoi(k)
+			ids = append(ids, n)
 		}
-		writeData(w, list)
+		sort.Ints(ids)
+
+		page, limit := pageParams(r)
+		lastPage := 1
+		if limit > 0 {
+			lastPage = (len(ids) + limit - 1) / limit
+			if lastPage == 0 {
+				lastPage = 1
+			}
+		}
+		lo := (page - 1) * limit
+		hi := lo + limit
+		if lo > len(ids) {
+			lo = len(ids)
+		}
+		if hi > len(ids) {
+			hi = len(ids)
+		}
+		list := []any{}
+		for _, n := range ids[lo:hi] {
+			list = append(list, s.rows[collection][strconv.Itoa(n)])
+		}
+		writeDataMeta(w, list, map[string]any{
+			"pagination": map[string]any{"current": page, "lastPage": lastPage},
+		})
 	case r.Method == http.MethodGet:
 		row, ok := s.rows[collection][id]
 		if !ok {
@@ -135,6 +244,16 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.nextID++
 		body["id"] = float64(s.nextID)
 		s.rows[collection][strconv.Itoa(s.nextID)] = body
+		if s.dropCreateID[collection] {
+			reply := map[string]any{}
+			for k, v := range body {
+				if k != "id" {
+					reply[k] = v
+				}
+			}
+			writeData(w, reply)
+			return
+		}
 		writeData(w, body)
 	case r.Method == http.MethodPut || r.Method == http.MethodPatch:
 		row, ok := s.rows[collection][id]
@@ -157,7 +276,116 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// pageParams reads CT's ?page=&limit= pair, defaulting to one big page.
+func pageParams(r *http.Request) (page, limit int) {
+	page, _ = strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	limit, _ = strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit < 1 {
+		limit = 1000
+	}
+	return page, limit
+}
+
+func writeDataMeta(w http.ResponseWriter, v any, meta map[string]any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"data": v, "meta": meta})
+}
+
 func writeData(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"data": v})
+}
+
+// handleLegacy serves POST /index.php?q=<module>/ajax — form-encoded, and with
+// a {status,data} envelope where a FAILURE is still HTTP 200. Tests that only
+// checked the status code would pass against a broken call, so the mock models
+// the envelope faithfully, including the "unknown function" error CT returns.
+func (s *Server) handleLegacy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if r.Header.Get("CSRF-Token") == "" || r.Header.Get("Cookie") == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]any{"status": "error", "message": "CSRF-Token is invalid"})
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	writeStatus := func(v map[string]any) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": v})
+	}
+	writeErr := func(msg string) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"status": "error", "message": msg})
+	}
+
+	switch r.Form.Get("func") {
+	case "getMasterData":
+		writeStatus(map[string]any{
+			"masterDataTables": map[string]any{
+				"7": map[string]any{
+					"id":        7,
+					"tablename": "cdb_bereich",
+					"desc": map[string]any{
+						"bezeichnung": map[string]any{"field": "bezeichnung"},
+						"kuerzel":     map[string]any{"field": "kuerzel"},
+						"sortkey":     map[string]any{"field": "sortkey"},
+					},
+				},
+			},
+		})
+	case "saveMasterData":
+		if r.Form.Get("table") != "cdb_bereich" {
+			writeErr("unknown table " + r.Form.Get("table"))
+			return
+		}
+		row := map[string]any{}
+		for n := 0; ; n++ {
+			col := r.Form.Get(fmt.Sprintf("col%d", n))
+			if col == "" {
+				break
+			}
+			row[col] = r.Form.Get(fmt.Sprintf("value%d", n))
+		}
+		// Translate the legacy column names back to the REST names the
+		// collection read serves, so a write is visible to the next GET.
+		rest := map[string]any{
+			"name":   row["bezeichnung"],
+			"shorty": row["kuerzel"],
+		}
+		if v, ok := row["sortkey"]; ok {
+			n, _ := strconv.Atoi(fmt.Sprint(v))
+			rest["sortKey"] = float64(n)
+		}
+		if s.rows["/departments"] == nil {
+			s.rows["/departments"] = map[string]any{}
+		}
+		if id := r.Form.Get("id"); id != "" {
+			existing, ok := s.rows["/departments"][id]
+			if !ok {
+				writeErr("no such row " + id)
+				return
+			}
+			target := existing.(map[string]any)
+			for k, v := range rest {
+				target[k] = v
+			}
+		} else {
+			s.nextID++
+			rest["id"] = float64(s.nextID)
+			s.rows["/departments"][strconv.Itoa(s.nextID)] = rest
+		}
+		writeStatus(nil)
+	default:
+		// CT validates function names rather than ignoring unknown ones.
+		writeErr("Function " + r.Form.Get("func") + " was not defined as Function!")
+	}
 }

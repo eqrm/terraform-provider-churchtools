@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/eqrm/terraform-provider-churchtools/internal/testmock"
 )
 
 func newTestClient(h http.Handler) (*Client, func()) {
@@ -136,5 +139,85 @@ func TestGet_EmptyIDIsRejected(t *testing.T) {
 
 	if _, err := c.Get(context.Background(), "/campuses", ""); err == nil {
 		t.Fatal("Get with empty id returned nil error")
+	}
+}
+
+// CT pages its list endpoints and reports progress in meta.pagination. A List
+// that reads only page 1 silently truncates the collection -- and departments
+// resolve their id by filtering exactly this list, so a short read makes the
+// duplicate-name guard pass and writes a second Bereich of the same name.
+func TestList_FollowsPagination(t *testing.T) {
+	var gotPaths []string
+	c, done := newTestClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.RequestURI())
+		switch r.URL.Query().Get("page") {
+		case "", "1":
+			w.Write([]byte(`{"data":[{"id":1},{"id":2}],"meta":{"pagination":{"current":1,"lastPage":3}}}`))
+		case "2":
+			w.Write([]byte(`{"data":[{"id":3},{"id":4}],"meta":{"pagination":{"current":2,"lastPage":3}}}`))
+		default:
+			w.Write([]byte(`{"data":[{"id":5}],"meta":{"pagination":{"current":3,"lastPage":3}}}`))
+		}
+	}))
+	defer done()
+
+	rows, err := c.List(context.Background(), "/departments")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != 5 {
+		t.Fatalf("len(rows) = %d, want 5 across 3 pages; requests: %v", len(rows), gotPaths)
+	}
+	for i, want := range []float64{1, 2, 3, 4, 5} {
+		if rows[i]["id"] != want {
+			t.Errorf("rows[%d][id] = %v, want %v", i, rows[i]["id"], want)
+		}
+	}
+}
+
+// An endpoint that returns no pagination block is not a paged list; one request
+// must be enough, with no endless follow-up pages.
+func TestList_UnpagedEndpointReadsOnce(t *testing.T) {
+	calls := 0
+	c, done := newTestClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Write([]byte(`{"data":[{"id":1}]}`))
+	}))
+	defer done()
+
+	rows, err := c.List(context.Background(), "/campuses")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != 1 || calls != 1 {
+		t.Errorf("rows=%d calls=%d, want 1 and 1", len(rows), calls)
+	}
+}
+
+// One *client.Client is shared by every resource and Terraform applies
+// resources concurrently, so the lazy legacy-session handshake runs from
+// several goroutines at once. Guard it: before the mutex this raced on
+// c.cookie/c.csrfToken under -race.
+func TestSession_ConcurrentHandshakeIsSafe(t *testing.T) {
+	ct := testmock.New()
+	defer ct.Close()
+
+	c := New(ct.URL, "tok")
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := c.SaveMasterData(context.Background(), DepartmentTable,
+				map[string]any{"bezeichnung": "Bereich", "kuerzel": "B", "sortkey": 0}, nil); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("concurrent SaveMasterData: %v", err)
 	}
 }
