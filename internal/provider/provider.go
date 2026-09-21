@@ -32,13 +32,14 @@ type churchtoolsProvider struct {
 // legacy session, making each department write pay whoami + csrftoken again.
 type ProviderData struct {
 	Host   string
-	Token  string
 	Client *client.Client
 }
 
 type providerModel struct {
-	Host  types.String `tfsdk:"host"`
-	Token types.String `tfsdk:"token"`
+	Host          types.String `tfsdk:"host"`
+	Token         types.String `tfsdk:"token"`
+	SessionCookie types.String `tfsdk:"session_cookie"`
+	CSRFToken     types.String `tfsdk:"csrf_token"`
 }
 
 func New(version string) func() provider.Provider {
@@ -58,9 +59,22 @@ func (p *churchtoolsProvider) Schema(_ context.Context, _ provider.SchemaRequest
 				Description: "ChurchTools instance base URL, e.g. https://example.church.tools",
 			},
 			"token": schema.StringAttribute{
-				Required:    true,
-				Sensitive:   true,
-				Description: "ChurchTools login token.",
+				Optional:  true,
+				Sensitive: true,
+				Description: "ChurchTools login token. Permanent and unscopable, and an " +
+					"administrator credential on production — prefer session_cookie/csrf_token.",
+			},
+			"session_cookie": schema.StringAttribute{
+				Optional:  true,
+				Sensitive: true,
+				Description: "A ChurchTools session cookie, as emitted by `ct auth token`. " +
+					"Set together with csrf_token, instead of token.",
+			},
+			"csrf_token": schema.StringAttribute{
+				Optional:  true,
+				Sensitive: true,
+				Description: "The CSRF token belonging to session_cookie, as emitted by " +
+					"`ct auth token`. Set together with session_cookie, instead of token.",
 			},
 		},
 	}
@@ -72,28 +86,57 @@ func (p *churchtoolsProvider) Configure(ctx context.Context, req provider.Config
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	// host/token may be unknown at plan time when they come from another
-	// resource's output; the framework calls Configure anyway, so defer
-	// instead of reporting a spurious config error.
-	if cfg.Host.IsUnknown() || cfg.Token.IsUnknown() {
+	// Any credential may be unknown at plan time when it comes from another
+	// resource's output -- which is the NORMAL case for the session pair, since
+	// it typically arrives from a `data "external"` block running `ct auth
+	// token`. The framework calls Configure anyway, so defer instead of
+	// reporting a spurious config error.
+	if cfg.Host.IsUnknown() || cfg.Token.IsUnknown() ||
+		cfg.SessionCookie.IsUnknown() || cfg.CSRFToken.IsUnknown() {
 		return
 	}
 	if msg := validateHost(cfg.Host.ValueString()); msg != "" {
 		resp.Diagnostics.AddAttributeError(path.Root("host"), "Ungueltiger ChurchTools-Host", msg)
 	}
-	if strings.TrimSpace(cfg.Token.ValueString()) == "" {
-		resp.Diagnostics.AddAttributeError(path.Root("token"), "Fehlender ChurchTools-Token",
-			"token darf nicht leer sein.")
+
+	token := strings.TrimSpace(cfg.Token.ValueString())
+	cookie := strings.TrimSpace(cfg.SessionCookie.ValueString())
+	csrf := strings.TrimSpace(cfg.CSRFToken.ValueString())
+
+	switch {
+	case token == "" && cookie == "" && csrf == "":
+		resp.Diagnostics.AddError("Fehlende ChurchTools-Anmeldedaten",
+			"Es muss entweder token oder session_cookie + csrf_token gesetzt sein. "+
+				"Bevorzugt wird die Session: `ct auth token` liefert sie, und der Login-Token "+
+				"bleibt im Keychain.")
+	case token != "" && (cookie != "" || csrf != ""):
+		// Refused rather than silently preferring one. Two credentials in a config
+		// usually means the author believes the one they just added is in use; if
+		// that belief is wrong they are authenticating as the wrong identity, and
+		// nothing downstream would say so.
+		resp.Diagnostics.AddError("Widerspruechliche ChurchTools-Anmeldedaten",
+			"token und session_cookie/csrf_token schliessen sich aus. Genau eine Variante setzen.")
+	case cookie != "" && csrf == "":
+		// The cookie alone authenticates GETs, so a plan would succeed and the
+		// first write would fail. Refuse at configure time instead.
+		resp.Diagnostics.AddAttributeError(path.Root("csrf_token"), "Unvollstaendige Session",
+			"session_cookie ist gesetzt, csrf_token fehlt. Ohne CSRF-Token schlaegt jeder "+
+				"Schreibvorgang fehl, waehrend plan noch funktioniert.")
+	case csrf != "" && cookie == "":
+		resp.Diagnostics.AddAttributeError(path.Root("session_cookie"), "Unvollstaendige Session",
+			"csrf_token ist gesetzt, session_cookie fehlt.")
 	}
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	data := &ProviderData{
-		Host:   cfg.Host.ValueString(),
-		Token:  cfg.Token.ValueString(),
-		Client: client.New(cfg.Host.ValueString(), cfg.Token.ValueString()),
+	host := cfg.Host.ValueString()
+	api := client.New(host, token)
+	if token == "" {
+		api = client.NewWithSession(host, cookie, csrf)
 	}
+
+	data := &ProviderData{Host: host, Client: api}
 	resp.ResourceData = data
 	resp.DataSourceData = data
 }

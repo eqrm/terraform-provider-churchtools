@@ -3,6 +3,7 @@ package provider_test
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -148,4 +149,69 @@ func TestMockRefusesDepartmentWrites(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("GET /departments returned %d, want 200 — reads are REST", resp.StatusCode)
 	}
+}
+
+// sessionProviderBlock configures the provider the way a credential helper
+// does: no token anywhere, just the session `ct auth token` emits.
+func sessionProviderBlock(host, cookie, csrf string) string {
+	return fmt.Sprintf("provider \"churchtools\" {\n  host           = %q\n"+
+		"  session_cookie = %q\n  csrf_token     = %q\n}\n", host, cookie, csrf)
+}
+
+// The end-to-end proof of #179's other half: a full create/update round-trip
+// with the permanent login token never present. The mock refuses anything not
+// carrying the session, so a green run means the cookie really authenticated
+// the reads AND the CSRF header really authenticated the writes.
+func TestAccCampus_SessionAuth(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	mock.RequireSession("sid=abc", "csrf-1")
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{
+				Config: sessionProviderBlock(mock.URL, "sid=abc", "csrf-1") + `
+resource "churchtools_campus" "neu" {
+  name   = "Neustadt"
+  shorty = "NS"
+}`,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("churchtools_campus.neu", "name", "Neustadt"),
+					resource.TestCheckResourceAttrSet("churchtools_campus.neu", "id"),
+				),
+			},
+			{
+				Config: sessionProviderBlock(mock.URL, "sid=abc", "csrf-1") + `
+resource "churchtools_campus" "neu" {
+  name   = "Neustadt West"
+  shorty = "NSW"
+}`,
+				Check: resource.TestCheckResourceAttr("churchtools_campus.neu", "name", "Neustadt West"),
+			},
+		},
+	})
+}
+
+// A session the instance no longer accepts must say what fixes it. The provider
+// holds no token, so it cannot renew one — re-running is the remedy, and a
+// generic "unauthorized" would send the operator looking at their credentials.
+func TestAccCampus_ExpiredSessionExplainsItself(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	mock.RequireSession("sid=fresh", "csrf-1")
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{
+				Config: sessionProviderBlock(mock.URL, "sid=stale", "csrf-1") + `
+resource "churchtools_campus" "neu" {
+  name   = "Neustadt"
+  shorty = "NS"
+}`,
+				ExpectError: regexp.MustCompile(`re-run`),
+			},
+		},
+	})
 }

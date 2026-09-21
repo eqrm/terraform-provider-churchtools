@@ -202,3 +202,66 @@ resource "churchtools_department" "musik" {
 		}},
 	})
 }
+
+// Departments are the ONLY resource written through the legacy /index.php
+// endpoint, so session auth reaching REST proves nothing about them. The mock
+// holds that path to the same session as every REST route, which means a
+// create landing in /departments is evidence the cookie and the CSRF token
+// were both carried on the form-encoded write.
+func TestAccDepartment_SessionAuthOnTheLegacyEndpoint(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	mock.RequireSession("sid=abc", "csrf-1")
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{{
+			Config: sessionProviderBlock(mock.URL, "sid=abc", "csrf-1") + `
+resource "churchtools_department" "musik" {
+  name   = "Bereich Musik"
+  shorty = "MU"
+}`,
+			Check: resource.TestCheckResourceAttrSet("churchtools_department.musik", "id"),
+		}},
+	})
+
+	if row := mock.Find("/departments", "name", "Bereich Musik"); row == nil {
+		t.Fatal("the Bereich never reached /departments — the legacy write did not carry the session")
+	}
+}
+
+// The gate that makes the test above mean something. Without RequireSession
+// covering /index.php, handleLegacy asks only that the two headers be
+// NON-EMPTY -- so a stale cookie or a wrong CSRF token sails through and a
+// session-mode department test goes green while proving nothing. This asserts
+// the mock discriminates, which is the property the test above leans on.
+func TestMockHoldsTheLegacyEndpointToTheSession(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	mock.RequireSession("sid=fresh", "csrf-1")
+
+	for _, tc := range []struct{ name, cookie, csrf string }{
+		{"stale cookie", "sid=stale", "csrf-1"},
+		{"wrong csrf", "sid=fresh", "csrf-wrong"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost, mock.URL+"/index.php?q=churchdb/ajax",
+				strings.NewReader("func=saveMasterData&table=cdb_bereich"))
+			if err != nil {
+				t.Fatalf("NewRequest: %v", err)
+			}
+			req.Header.Set("Cookie", tc.cookie)
+			req.Header.Set("CSRF-Token", tc.csrf)
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("POST: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Errorf("legacy POST with a %s returned %d, want 401", tc.name, resp.StatusCode)
+			}
+		})
+	}
+}
