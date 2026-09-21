@@ -48,9 +48,15 @@ func (s *Server) Seed(collection string, id int, row map[string]any) {
 }
 
 // RequireSession makes the mock behave like a ChurchTools instance that only
-// accepts this session: every REST read must carry the cookie, and every write
-// must additionally carry the CSRF token. A token in an Authorization header is
-// not accepted, which is the point -- in session mode there is no token.
+// accepts this session: every read must carry the cookie, and every write must
+// additionally carry the CSRF token. A token in an Authorization header is not
+// accepted, which is the point -- in session mode there is no token.
+//
+// The gate sits ABOVE the legacy dispatch, so /index.php is held to the same
+// session as the REST routes. Below it, handleLegacy's own check -- which only
+// asserts the two headers are non-empty -- would pass a stale cookie or the
+// wrong CSRF token, and a session-mode department test would go green without
+// proving anything. Departments are written only through that path.
 func (s *Server) RequireSession(cookie, csrf string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -153,11 +159,6 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if r.URL.Path == legacyPath {
-		s.handleLegacy(w, r)
-		return
-	}
-
 	if s.requireCookie != "" {
 		if r.Header.Get("Cookie") != s.requireCookie {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -169,6 +170,11 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			writeData(w, map[string]any{"message": "CSRF-Token is invalid"})
 			return
 		}
+	}
+
+	if r.URL.Path == legacyPath {
+		s.handleLegacy(w, r)
+		return
 	}
 
 	collection, id := splitPath(r.URL.Path)

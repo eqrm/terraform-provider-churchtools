@@ -101,7 +101,13 @@ func NewWithSession(baseURL, cookie, csrf string) *Client {
 // token. The two modes authenticate every REST call differently and, more
 // importantly, recover from a 401 differently: a token client can buy a new
 // session, a session client can only tell the operator to run again.
-func (c *Client) usesSession() bool { return c.fixedCookie != "" }
+//
+// EITHER half means session mode. Keying on the cookie alone would make a
+// half-specified session fall back to token mode and send `Authorization:
+// Login ` with an empty token -- a 401 whose message names neither cause. The
+// provider refuses the partial pair at configure time, but this constructor is
+// exported and is not obliged to be called through it.
+func (c *Client) usesSession() bool { return c.fixedCookie != "" || c.fixedCSRF != "" }
 
 // authenticate applies whichever credential this client holds.
 //
@@ -128,7 +134,19 @@ func (c *Client) authenticate(req *http.Request, method string) {
 // helper fetches a fresh session on the next read.
 var ErrSessionExpired = errors.New("churchtools: the supplied session is no longer valid")
 
+// ErrNotConfigured reports a call on a client the provider never built.
+//
+// Configure DEFERS when any credential is unknown -- the normal state for the
+// session pair, which arrives from a `data "external"` block -- and leaves
+// ResourceData nil, so a resource can reach CRUD holding a nil client. Every
+// request funnels through do() or AjaxJSON(), so checking the receiver in
+// those two places turns a plugin crash into something an operator can read.
+var ErrNotConfigured = errors.New("churchtools: client not configured (provider credentials were still unknown)")
+
 func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte, error) {
+	if c == nil {
+		return nil, fmt.Errorf("%w: %s %s", ErrNotConfigured, method, path)
+	}
 	var buf io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -162,9 +180,12 @@ func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte,
 		// ct-cli calls its `expiresAt` a ceiling, not a promise: ChurchTools does
 		// not advertise a session lifetime, so a 401 here is expected eventually
 		// rather than exceptional. Say what to do about it.
-		return nil, fmt.Errorf("%w (%s %s). Sessions expire; re-run so the credential "+
+		// Keep the instance's own words: not every 401 here is an expiry. A
+		// malformed cookie, or one that never matched its CSRF token, 401s the
+		// same way and re-running forever will not fix it.
+		return nil, fmt.Errorf("%w (%s %s): %s. Sessions expire; re-run so the credential "+
 			"helper fetches a fresh one (e.g. `ct auth token`). The provider cannot renew a "+
-			"session it was handed", ErrSessionExpired, method, path)
+			"session it was handed", ErrSessionExpired, method, path, strings.TrimSpace(string(raw)))
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, &StatusError{Method: method, Path: path, Status: resp.StatusCode, Body: string(raw)}

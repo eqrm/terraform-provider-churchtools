@@ -97,6 +97,9 @@ func (c *Client) Ajax(ctx context.Context, module string, params map[string]stri
 // the endpoint can be trusted to validate function names rather than silently
 // ignoring an unknown one.
 func (c *Client) AjaxJSON(ctx context.Context, module string, params map[string]string, into any) error {
+	if c == nil {
+		return fmt.Errorf("%w: %s/ajax %s", ErrNotConfigured, module, params["func"])
+	}
 	cookie, csrf, err := c.session(ctx)
 	if err != nil {
 		return err
@@ -132,7 +135,29 @@ func (c *Client) AjaxJSON(ctx context.Context, module string, params map[string]
 		Message string          `json:"message"`
 		Data    json.RawMessage `json:"data"`
 	}
-	if err := json.Unmarshal(raw, &env); err != nil {
+	decodeErr := json.Unmarshal(raw, &env)
+
+	// The status code is checked BEFORE the envelope, because an expired session
+	// does not get one. A signed-out ChurchTools answers this endpoint with a 401
+	// carrying an HTML login page, which decodes into nothing and would otherwise
+	// surface as "undecodable response: <!DOCTYPE html>" -- true, and useless.
+	// Departments are written only through here, so without this the remedy the
+	// REST path gives never reaches the one resource that needs the legacy one.
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		detail := strings.TrimSpace(env.Message)
+		if detail == "" {
+			detail = strings.TrimSpace(string(raw))
+		}
+		if resp.StatusCode == http.StatusUnauthorized && c.usesSession() {
+			return fmt.Errorf("%w (%s/ajax %s): %s. Sessions expire; re-run so the credential "+
+				"helper fetches a fresh one (e.g. `ct auth token`). The provider cannot renew a "+
+				"session it was handed", ErrSessionExpired, module, params["func"], detail)
+		}
+		return fmt.Errorf("churchtools: %s/ajax %s returned %d: %s",
+			module, params["func"], resp.StatusCode, detail)
+	}
+
+	if decodeErr != nil {
 		return fmt.Errorf("churchtools: %s/ajax %s: undecodable response: %s",
 			module, params["func"], string(raw))
 	}
