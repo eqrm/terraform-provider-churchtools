@@ -1,0 +1,67 @@
+name: Release
+
+# Builds and signs a provider release for the OpenTofu registry. Triggered by a
+# `vX.Y.Z` tag, because that tag is what the registry version resolves to.
+#
+# Requires two repository secrets, which do not exist until someone creates the
+# signing key:
+#   GPG_PRIVATE_KEY  — ASCII-armoured private key of the eqrm signing key
+#   PASSPHRASE       — its passphrase
+# and one thing that is NOT a secret and still has to be done by a human: the
+# matching PUBLIC key must be registered with the OpenTofu registry for the
+# `eqrm` namespace, submitted by a PUBLIC member of the org. Until it is,
+# releases build and sign fine and `tofu init` still refuses them.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # create the GitHub release and upload its assets
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # goreleaser reads tags to compute the version.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Fail early and legibly if the signing secrets are missing, rather than
+      # inside goreleaser's signing hook with a gpg error.
+      - name: Check the signing key is configured
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          PASSPHRASE: ${{ secrets.PASSPHRASE }}
+        run: |
+          missing=""
+          [ -n "$GPG_PRIVATE_KEY" ] || missing="$missing secrets.GPG_PRIVATE_KEY"
+          [ -n "$PASSPHRASE" ]      || missing="$missing secrets.PASSPHRASE"
+          if [ -n "$missing" ]; then
+            echo "::error::Cannot cut a release without the signing key — missing:$missing" >&2
+            echo "An unsigned release is worse than no release: the registry would" >&2
+            echo "advertise a version that every 'tofu init' then refuses." >&2
+            exit 1
+          fi
+          echo "OK: signing key present"
+
+      - name: Import the signing key
+        id: import_gpg
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.PASSPHRASE }}
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
