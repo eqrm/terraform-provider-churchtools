@@ -26,6 +26,13 @@ import (
 // resources concurrently, so the fields are both written and READ under the
 // mutex -- returning copies keeps callers off the shared state entirely.
 func (c *Client) session(ctx context.Context) (cookie, csrf string, err error) {
+	// A session the operator supplied is already the answer, and buying another
+	// is not an option: this client holds no token to buy one with. Returned
+	// before the mutex because these fields are immutable after construction.
+	if c.usesSession() {
+		return c.fixedCookie, c.fixedCSRF, nil
+	}
+
 	c.sessionMu.Lock()
 	defer c.sessionMu.Unlock()
 

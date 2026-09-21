@@ -50,6 +50,13 @@ type Client struct {
 	token   string
 	http    *http.Client
 
+	// A session supplied by the OPERATOR rather than bought with a token (see
+	// NewWithSession). Written once at construction and never again, so unlike
+	// the lazily acquired pair below these need no mutex -- and must not be
+	// cleared on an error path, because nothing here can buy a replacement.
+	fixedCookie string
+	fixedCSRF   string
+
 	// Legacy-endpoint session (see session.go). Acquired lazily: a run that
 	// only touches REST resources never performs the handshake.
 	//
@@ -69,6 +76,58 @@ func New(baseURL, token string) *Client {
 	}
 }
 
+// NewWithSession builds a client that authenticates with a session somebody
+// else already bought -- what `ct auth token` emits.
+//
+// The reason this mode exists is that the alternative is worse. A ChurchTools
+// login token is permanent, cannot be scoped, cannot be rotated without
+// invalidating every other use of it, and on a production instance it is an
+// administrator credential. Writing one into a `.tfvars`, a CI variable or a
+// `TF_LOG=DEBUG` transcript puts a forever-credential somewhere it will outlive
+// whoever put it there. The session bought with it expires on its own, is
+// dropped by `ct auth logout`, and a leaked copy is dead within hours.
+//
+// So the token stays in ct-cli's Keychain and never reaches this process.
+func NewWithSession(baseURL, cookie, csrf string) *Client {
+	return &Client{
+		baseURL:     strings.TrimRight(baseURL, "/"),
+		fixedCookie: cookie,
+		fixedCSRF:   csrf,
+		http:        &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+// usesSession reports whether this client was handed a session instead of a
+// token. The two modes authenticate every REST call differently and, more
+// importantly, recover from a 401 differently: a token client can buy a new
+// session, a session client can only tell the operator to run again.
+func (c *Client) usesSession() bool { return c.fixedCookie != "" }
+
+// authenticate applies whichever credential this client holds.
+//
+// Token mode sends `Authorization: Login <token>`, which ChurchTools accepts on
+// every REST route. Session mode sends the cookie instead and adds the CSRF
+// header to writes -- exactly what a browser does, and what ct-cli has always
+// done for its own REST calls once its handshake completed.
+func (c *Client) authenticate(req *http.Request, method string) {
+	if !c.usesSession() {
+		req.Header.Set("Authorization", "Login "+c.token)
+		return
+	}
+	req.Header.Set("Cookie", c.fixedCookie)
+	if method != http.MethodGet && method != http.MethodHead {
+		req.Header.Set("CSRF-Token", c.fixedCSRF)
+	}
+}
+
+// ErrSessionExpired is a 401 in session mode.
+//
+// It is a distinct error because the remedy is distinct and not guessable: the
+// provider cannot renew a session it was handed, so "check your credentials" is
+// the wrong advice. Re-running is the right advice, because the credential
+// helper fetches a fresh session on the next read.
+var ErrSessionExpired = errors.New("churchtools: the supplied session is no longer valid")
+
 func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte, error) {
 	var buf io.Reader
 	if body != nil {
@@ -83,7 +142,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte,
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Login "+c.token)
+	c.authenticate(req, method)
 	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -98,6 +157,14 @@ func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte,
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
+	}
+	if resp.StatusCode == http.StatusUnauthorized && c.usesSession() {
+		// ct-cli calls its `expiresAt` a ceiling, not a promise: ChurchTools does
+		// not advertise a session lifetime, so a 401 here is expected eventually
+		// rather than exceptional. Say what to do about it.
+		return nil, fmt.Errorf("%w (%s %s). Sessions expire; re-run so the credential "+
+			"helper fetches a fresh one (e.g. `ct auth token`). The provider cannot renew a "+
+			"session it was handed", ErrSessionExpired, method, path)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, &StatusError{Method: method, Path: path, Status: resp.StatusCode, Body: string(raw)}
@@ -172,9 +239,9 @@ func (c *Client) doWithCookie(ctx context.Context, method, path string) ([]byte,
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Login "+c.token)
+	c.authenticate(req, method)
 	req.Header.Set("Accept", "application/json")
-	if c.cookie != "" {
+	if !c.usesSession() && c.cookie != "" {
 		req.Header.Set("Cookie", c.cookie)
 	}
 	resp, err := c.http.Do(req)

@@ -22,6 +22,11 @@ type Server struct {
 	// dropCreateID makes POST answer without an `id`, reproducing a CT reply
 	// the provider must refuse rather than store as "".
 	dropCreateID map[string]bool
+	// requireCookie, when set, makes every REST route answer 401 unless the
+	// request carries exactly this cookie -- so a session-mode test proves the
+	// credential actually authenticated, rather than that the mock ignored it.
+	requireCookie string
+	requireCSRF   string
 }
 
 func New() *Server {
@@ -40,6 +45,16 @@ func (s *Server) Seed(collection string, id int, row map[string]any) {
 	}
 	row["id"] = float64(id)
 	s.rows[collection][strconv.Itoa(id)] = row
+}
+
+// RequireSession makes the mock behave like a ChurchTools instance that only
+// accepts this session: every REST read must carry the cookie, and every write
+// must additionally carry the CSRF token. A token in an Authorization header is
+// not accepted, which is the point -- in session mode there is no token.
+func (s *Server) RequireSession(cookie, csrf string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.requireCookie, s.requireCSRF = cookie, csrf
 }
 
 // DropCreateID makes this collection's POST answer omit the id.
@@ -141,6 +156,19 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == legacyPath {
 		s.handleLegacy(w, r)
 		return
+	}
+
+	if s.requireCookie != "" {
+		if r.Header.Get("Cookie") != s.requireCookie {
+			w.WriteHeader(http.StatusUnauthorized)
+			writeData(w, map[string]any{"message": "no or wrong session cookie"})
+			return
+		}
+		if r.Method != http.MethodGet && r.Header.Get("CSRF-Token") != s.requireCSRF {
+			w.WriteHeader(http.StatusUnauthorized)
+			writeData(w, map[string]any{"message": "CSRF-Token is invalid"})
+			return
+		}
 	}
 
 	collection, id := splitPath(r.URL.Path)

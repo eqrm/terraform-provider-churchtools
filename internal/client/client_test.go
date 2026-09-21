@@ -221,3 +221,128 @@ func TestSession_ConcurrentHandshakeIsSafe(t *testing.T) {
 		t.Errorf("concurrent SaveMasterData: %v", err)
 	}
 }
+
+// --- session mode (ct auth token) -------------------------------------------
+
+// The whole point of the mode: the permanent login token never reaches this
+// process, so nothing may send it — and the session must authenticate the
+// ordinary REST calls, not just the legacy ajax endpoint.
+func TestSessionMode_SendsCookieAndNeverTheToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("Authorization = %q, want none in session mode", got)
+		}
+		if got := r.Header.Get("Cookie"); got != "sid=abc" {
+			t.Errorf("Cookie = %q, want %q", got, "sid=abc")
+		}
+		if got := r.Header.Get("CSRF-Token"); got != "" {
+			t.Errorf("CSRF-Token = %q, want none on a GET", got)
+		}
+		w.Write([]byte(`{"data":[{"id":0,"name":"Mainz"}]}`))
+	}))
+	defer srv.Close()
+
+	rows, err := NewWithSession(srv.URL, "sid=abc", "csrf-1").List(context.Background(), "/campuses")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(rows))
+	}
+}
+
+// A write without the CSRF header is answered by ChurchTools with a 401 that
+// reads like an auth failure, so the header has to ride every non-GET.
+func TestSessionMode_WritesCarryCSRF(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("CSRF-Token"); got != "csrf-1" {
+			t.Errorf("CSRF-Token = %q, want %q", got, "csrf-1")
+		}
+		w.Write([]byte(`{"data":{"id":7,"name":"Idstein"}}`))
+	}))
+	defer srv.Close()
+
+	if _, err := NewWithSession(srv.URL, "sid=abc", "csrf-1").
+		Create(context.Background(), "/campuses", Row{"name": "Idstein"}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+}
+
+// ct-cli calls its expiresAt a ceiling rather than a promise, so a 401 is the
+// expected end of every session. The provider cannot renew one it was handed,
+// so the error has to say what actually fixes it.
+func TestSessionMode_ExpiredSessionSaysWhatToDo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"message":"Unauthorized"}`))
+	}))
+	defer srv.Close()
+
+	_, err := NewWithSession(srv.URL, "sid=abc", "csrf-1").List(context.Background(), "/campuses")
+	if !errors.Is(err, ErrSessionExpired) {
+		t.Fatalf("err = %v, want ErrSessionExpired", err)
+	}
+	if !strings.Contains(err.Error(), "re-run") {
+		t.Errorf("error does not name the remedy: %v", err)
+	}
+}
+
+// The same 401 in TOKEN mode is an ordinary StatusError: that client CAN buy a
+// new session, so telling its operator to re-run would be wrong advice.
+func TestTokenMode_UnauthorizedStaysAStatusError(t *testing.T) {
+	c, done := newTestClient(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer done()
+
+	_, err := c.List(context.Background(), "/campuses")
+	if errors.Is(err, ErrSessionExpired) {
+		t.Fatalf("token mode must not report ErrSessionExpired: %v", err)
+	}
+	var se *StatusError
+	if !errors.As(err, &se) || se.Status != http.StatusUnauthorized {
+		t.Fatalf("err = %v, want StatusError(401)", err)
+	}
+}
+
+// A supplied session must never trigger the whoami/csrftoken handshake: there
+// is no token to perform it with, and an attempt would fail the run.
+func TestSessionMode_SkipsTheHandshake(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s %s — session mode must not handshake", r.Method, r.URL.Path)
+	}))
+	defer srv.Close()
+
+	cookie, csrf, err := NewWithSession(srv.URL, "sid=abc", "csrf-1").session(context.Background())
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	if cookie != "sid=abc" || csrf != "csrf-1" {
+		t.Errorf("session() = (%q, %q), want the supplied pair", cookie, csrf)
+	}
+}
+
+// Bereiche are written only through the legacy form-encoded endpoint, so that
+// path has to work in session mode as well — and it is the one place the CSRF
+// header was always required, token mode or not.
+func TestSessionMode_LegacyAjaxUsesTheSuppliedSession(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/whoami" || r.URL.Path == "/api/csrftoken" {
+			t.Fatalf("session mode must not handshake, got %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Cookie"); got != "sid=abc" {
+			t.Errorf("Cookie = %q, want %q", got, "sid=abc")
+		}
+		if got := r.Header.Get("CSRF-Token"); got != "csrf-1" {
+			t.Errorf("CSRF-Token = %q, want %q", got, "csrf-1")
+		}
+		w.Write([]byte(`{"status":"success","data":{}}`))
+	}))
+	defer srv.Close()
+
+	err := NewWithSession(srv.URL, "sid=abc", "csrf-1").
+		Ajax(context.Background(), "churchdb", map[string]string{"func": "saveBereich"})
+	if err != nil {
+		t.Fatalf("Ajax: %v", err)
+	}
+}
