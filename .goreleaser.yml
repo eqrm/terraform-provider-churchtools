@@ -1,0 +1,67 @@
+# Release build for the OpenTofu / Terraform registry.
+#
+# The registry does not build anything: it reads a GitHub release and expects a
+# very specific set of assets — one zip per OS/arch named
+# `terraform-provider-churchtools_<version>_<os>_<arch>.zip`, a `_SHA256SUMS`
+# document listing them, and a DETACHED GPG signature of that document. The
+# `signing_keys` the registry holds for the eqrm namespace must include the key
+# used here, or `tofu init` fails signature verification for every user.
+#
+# This file is the standard provider layout; the parts worth not "tidying" are
+# called out below.
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - env:
+      # No cgo: the registry serves one binary per platform and a cgo build
+      # would link against whatever the runner happens to have.
+      - CGO_ENABLED=0
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    flags:
+      - -trimpath
+    ldflags:
+      # `version` in main.go, so a bug report can name the build it came from.
+      - "-s -w -X main.version={{.Version}}"
+    goos: [freebsd, windows, linux, darwin]
+    goarch: [amd64, "386", arm, arm64]
+    ignore:
+      - goos: darwin
+        goarch: "386"
+      - goos: darwin
+        goarch: arm
+    binary: "{{ .ProjectName }}_v{{ .Version }}"
+
+archives:
+  - formats: [zip]
+    # EXACTLY this name shape, or the registry cannot find the asset it just
+    # advertised. Note `.Version` here is the tag WITHOUT the leading v.
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
+  algorithm: sha256
+
+signs:
+  - artifacts: checksum
+    args:
+      # --detach-sign, not --sign: the registry fetches the signature as its own
+      # object alongside the checksum document.
+      - "--batch"
+      - "--local-user"
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
+
+release:
+  # A provider release is the registry's input, not a changelog announcement;
+  # OpenTofu picks up the version as soon as the release is published.
+  draft: false
+
+changelog:
+  disable: true

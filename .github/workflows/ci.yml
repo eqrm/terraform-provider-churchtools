@@ -16,3 +16,19 @@ jobs:
       - run: go test ./... -v -race
         env:
           TF_ACC: "1"
+
+  # The release config is only exercised by a tag, so without this it would be
+  # first discovered to be wrong while cutting a release — and a release that
+  # half-happens leaves a tag the registry may already have seen. `check` is
+  # config validation only: it builds and signs nothing.
+  release-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: check

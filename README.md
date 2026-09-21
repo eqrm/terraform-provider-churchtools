@@ -24,6 +24,42 @@ comment viewer) only.
 Nothing is ever deleted: every resource's `Delete` refuses and directs the
 operator to the ChurchTools UI instead.
 
+## Install
+
+```hcl
+terraform {
+  required_providers {
+    churchtools = {
+      source  = "eqrm/churchtools"
+      version = "~> 0.1"
+    }
+  }
+}
+```
+
+Until the first signed release is published and registered, this resolves to
+nothing and `tofu init` fails — see _Releasing_ below for what is still
+outstanding. Build it locally in the meantime (_Local development_).
+
+## What is verified, and what is not
+
+Worth stating plainly, because "it has tests" and "its writes work" are different
+claims here.
+
+Every type's **read** path is exercised against a live ChurchTools instance, and
+the acceptance tests cover all five types against an in-process mock. The
+**write** path is the interesting one: `campus`, `group_type`, `person_status` and
+`comment_viewer` go through the REST API, but `department` (Bereich) has no REST
+write path at all and goes through ChurchTools' legacy master-data endpoint
+(`churchdb/ajax`, `cdb_bereich`) — which needs a session handshake rather than the
+token header, returns no id on create, and accepts an unknown column silently.
+
+That legacy path was verified end to end against a live instance on 2026-09-21:
+`name`, `shorty` and `sort_key` all land, each read back through a separate client
+rather than through the provider that wrote it. A Bereich **create** has never been
+exercised (nothing needed one) and a **delete** never will be, since Delete
+refuses by design.
+
 ## Authentication
 
 Two ways, and the second is preferred.
@@ -92,3 +128,33 @@ With a dev override, `tofu init` is skipped — run `tofu plan` directly.
     TF_ACC=1 go test ./...   # plus acceptance tests against an in-process mock
 
 No test touches a live ChurchTools instance.
+
+## Releasing
+
+A `vX.Y.Z` tag triggers `.github/workflows/release.yml`, which builds every
+platform with goreleaser, writes `_SHA256SUMS`, and GPG-signs that document. The
+registry serves those assets verbatim, so the asset names in `.goreleaser.yml`
+are load-bearing rather than cosmetic.
+
+Three things must be in place first, and none of them can be done from a
+pull request:
+
+1. **A signing key.** Create it, then set `GPG_PRIVATE_KEY` (ASCII-armoured
+   private key) and `PASSPHRASE` as repository secrets. The release workflow
+   fails early and says so if they are missing — an unsigned release is worse
+   than no release, because the registry would advertise a version that every
+   `tofu init` then refuses.
+2. **That key registered with the OpenTofu registry** for the `eqrm` namespace.
+   The registry only accepts a key from a **public** member of the organisation,
+   so whoever submits it has to make their `eqrm` membership public first.
+3. **A registry submission** — an issue on
+   [`opentofu/registry`](https://github.com/opentofu/registry/issues/new/choose),
+   which automation validates and turns into a pull request. The repository name
+   must be exactly `eqrm/terraform-provider-churchtools`, which it is.
+
+Until step 2 is done, releases build and sign correctly and are still unusable.
+
+## Licence
+
+[MPL-2.0](LICENSE) — the licence OpenTofu itself and every HashiCorp provider
+use.
