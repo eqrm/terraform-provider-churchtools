@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/eqrm/terraform-provider-churchtools/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 )
 
@@ -28,4 +29,23 @@ func configureClient(req resource.ConfigureRequest, resp *resource.ConfigureResp
 		return keep
 	}
 	return data.Client
+}
+
+// notConfigured guards every CRUD body against a nil client.
+//
+// configureClient returns `keep` when the framework calls Configure with no
+// provider data -- which is what happens when the provider's own Configure
+// deferred on an unknown credential -- so a fresh resource instance can reach
+// Create/Read/Update holding nil. A nil *client.Client dereferences on its
+// first field access and panics the plugin process, which Terraform reports as
+// a crash with no cause attached. The client refuses a nil receiver too, but
+// only the resource knows the German summary an operator should see.
+//
+// Delete and ImportState are absent on purpose: neither touches the client.
+func notConfigured(c *client.Client, diags *diag.Diagnostics) bool {
+	if c != nil {
+		return false
+	}
+	diags.AddError(notConfiguredSummary, notConfiguredDetail)
+	return true
 }

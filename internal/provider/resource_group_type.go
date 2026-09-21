@@ -90,6 +90,9 @@ func (r *groupTypeResource) managed(m groupTypeModel) client.Row {
 }
 
 func (r *groupTypeResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	if notConfigured(r.client, &resp.Diagnostics) {
+		return
+	}
 	var plan groupTypeModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -114,6 +117,9 @@ func (r *groupTypeResource) Create(ctx context.Context, req resource.CreateReque
 }
 
 func (r *groupTypeResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	if notConfigured(r.client, &resp.Diagnostics) {
+		return
+	}
 	var state groupTypeModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -134,6 +140,9 @@ func (r *groupTypeResource) Read(ctx context.Context, req resource.ReadRequest, 
 }
 
 func (r *groupTypeResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	if notConfigured(r.client, &resp.Diagnostics) {
+		return
+	}
 	var plan, state groupTypeModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)

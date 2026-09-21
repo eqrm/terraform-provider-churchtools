@@ -69,6 +69,9 @@ func (r *personStatusResource) managed(m personStatusModel) client.Row {
 }
 
 func (r *personStatusResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	if notConfigured(r.client, &resp.Diagnostics) {
+		return
+	}
 	var plan personStatusModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -89,6 +92,9 @@ func (r *personStatusResource) Create(ctx context.Context, req resource.CreateRe
 }
 
 func (r *personStatusResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	if notConfigured(r.client, &resp.Diagnostics) {
+		return
+	}
 	var state personStatusModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -113,6 +119,9 @@ func (r *personStatusResource) Read(ctx context.Context, req resource.ReadReques
 }
 
 func (r *personStatusResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	if notConfigured(r.client, &resp.Diagnostics) {
+		return
+	}
 	var plan, state personStatusModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)

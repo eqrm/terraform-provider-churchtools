@@ -104,6 +104,9 @@ func (r *departmentResource) findByID(ctx context.Context, id string) (client.Ro
 }
 
 func (r *departmentResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	if notConfigured(r.client, &resp.Diagnostics) {
+		return
+	}
 	var plan departmentModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -172,6 +175,9 @@ func (r *departmentResource) Create(ctx context.Context, req resource.CreateRequ
 }
 
 func (r *departmentResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	if notConfigured(r.client, &resp.Diagnostics) {
+		return
+	}
 	var state departmentModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -193,6 +199,9 @@ func (r *departmentResource) Read(ctx context.Context, req resource.ReadRequest,
 }
 
 func (r *departmentResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	if notConfigured(r.client, &resp.Diagnostics) {
+		return
+	}
 	var plan, state departmentModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)

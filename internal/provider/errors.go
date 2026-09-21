@@ -10,6 +10,22 @@ const (
 	notConfiguredSummary  = "Provider nicht konfiguriert"
 )
 
+// notConfiguredDetail explains the usual way a resource reaches CRUD holding
+// no client: the provider DEFERRED because a credential was still unknown.
+//
+// That is the normal state for session_cookie/csrf_token, which arrive from a
+// `data "external"` block and therefore do not exist until that block is read.
+//
+// It is not the only way. configureClient also keeps a nil client when
+// ProviderData is some other type, and reports THAT under this same summary
+// with its own detail -- so notConfiguredSummary fronts two unrelated causes,
+// and only the detail tells them apart. The other path aborts before CRUD, so
+// an operator sees one or the other, never both.
+const notConfiguredDetail = "Die Anmeldedaten des Providers waren beim Plan noch unbekannt " +
+	"(üblich bei session_cookie/csrf_token aus einem `data \"external\"`-Block), " +
+	"deshalb wurde der Provider nicht konfiguriert. Führe den Lauf erneut aus, " +
+	"oder setze die Anmeldedaten auf feste Werte."
+
 // orphanOnDeleteDetail explains what Delete actually did.
 //
 // This provider NEVER deletes in ChurchTools. Removing a resource from the
