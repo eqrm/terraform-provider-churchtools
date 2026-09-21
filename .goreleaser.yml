@@ -42,6 +42,13 @@ archives:
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
+  # The manifest is checksummed ALONGSIDE the zips, not instead of them. It is
+  # the file that tells the registry which provider protocol this speaks, so a
+  # manifest outside the signed checksum document is an unverified input to that
+  # decision.
+  extra_files:
+    - glob: "terraform-registry-manifest.json"
+      name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
   name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
   algorithm: sha256
 
@@ -59,6 +66,19 @@ signs:
       - "${artifact}"
 
 release:
+  # `terraform-registry-manifest.json` has to be UPLOADED, under a versioned
+  # name: the registry reads the release's assets, not the repository tree, so a
+  # manifest that only exists in git is a manifest the registry never sees. It
+  # then falls back to assuming an older protocol, and every `tofu init` fails
+  # against a provider that actually speaks 6.0.
+  #
+  # Missing from the first cut of this file; caught before the first tag rather
+  # than by it. The name_template is the canonical one from HashiCorp's
+  # provider scaffolding, not an invention.
+  extra_files:
+    - glob: "terraform-registry-manifest.json"
+      name_template: "{{ .ProjectName }}_{{ .Version }}_manifest.json"
+
   # A provider release is the registry's input, not a changelog announcement;
   # OpenTofu picks up the version as soon as the release is published.
   draft: false
