@@ -32,6 +32,14 @@ func nullStateFor(ctx context.Context, t *testing.T, r resource.Resource) (rsche
 	vals := map[string]tftypes.Value{}
 	for name, typ := range obj.AttributeTypes {
 		if name == "id" {
+			// tftypes.NewValue PANICS on a type mismatch, which would abort the
+			// whole binary with a tftypes stack trace in exactly the case this
+			// test exists to catch: a resource added later. sort_key and
+			// security_level_id are already Int64Attribute, so an id declared
+			// that way is a plausible mistake -- make it a readable failure.
+			if !typ.Is(tftypes.String) {
+				t.Fatalf("%T declares a non-string id (%s); teach nullStateFor to build one", r, typ)
+			}
 			vals[name] = tftypes.NewValue(typ, "1")
 			continue
 		}

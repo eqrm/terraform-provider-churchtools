@@ -10,17 +10,20 @@ const (
 	notConfiguredSummary  = "Provider nicht konfiguriert"
 )
 
-// notConfiguredDetail explains the one way a resource reaches CRUD holding no
-// client: the provider DEFERRED because a credential was still unknown.
+// notConfiguredDetail explains the usual way a resource reaches CRUD holding
+// no client: the provider DEFERRED because a credential was still unknown.
 //
 // That is the normal state for session_cookie/csrf_token, which arrive from a
 // `data "external"` block and therefore do not exist until that block is read.
-// Terraform normally reaches those resources only after the provider is
-// configured; when it does not, saying so beats dereferencing a nil client and
-// taking the plugin process down with a stack trace.
+//
+// It is not the only way. configureClient also keeps a nil client when
+// ProviderData is some other type, and reports THAT under this same summary
+// with its own detail -- so notConfiguredSummary fronts two unrelated causes,
+// and only the detail tells them apart. The other path aborts before CRUD, so
+// an operator sees one or the other, never both.
 const notConfiguredDetail = "Die Anmeldedaten des Providers waren beim Plan noch unbekannt " +
-	"(ueblich bei session_cookie/csrf_token aus einem `data \"external\"`-Block), " +
-	"deshalb wurde der Provider nicht konfiguriert. Fuehre den Lauf erneut aus, " +
+	"(üblich bei session_cookie/csrf_token aus einem `data \"external\"`-Block), " +
+	"deshalb wurde der Provider nicht konfiguriert. Führe den Lauf erneut aus, " +
 	"oder setze die Anmeldedaten auf feste Werte."
 
 // orphanOnDeleteDetail explains what Delete actually did.
