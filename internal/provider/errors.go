@@ -10,6 +10,19 @@ const (
 	notConfiguredSummary  = "Provider nicht konfiguriert"
 )
 
+// notConfiguredDetail explains the one way a resource reaches CRUD holding no
+// client: the provider DEFERRED because a credential was still unknown.
+//
+// That is the normal state for session_cookie/csrf_token, which arrive from a
+// `data "external"` block and therefore do not exist until that block is read.
+// Terraform normally reaches those resources only after the provider is
+// configured; when it does not, saying so beats dereferencing a nil client and
+// taking the plugin process down with a stack trace.
+const notConfiguredDetail = "Die Anmeldedaten des Providers waren beim Plan noch unbekannt " +
+	"(ueblich bei session_cookie/csrf_token aus einem `data \"external\"`-Block), " +
+	"deshalb wurde der Provider nicht konfiguriert. Fuehre den Lauf erneut aus, " +
+	"oder setze die Anmeldedaten auf feste Werte."
+
 // orphanOnDeleteDetail explains what Delete actually did.
 //
 // This provider NEVER deletes in ChurchTools. Removing a resource from the

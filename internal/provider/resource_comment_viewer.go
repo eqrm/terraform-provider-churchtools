@@ -64,6 +64,9 @@ func (r *commentViewerResource) managed(m commentViewerModel) client.Row {
 }
 
 func (r *commentViewerResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	if notConfigured(r.client, &resp.Diagnostics) {
+		return
+	}
 	var plan commentViewerModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
@@ -89,6 +92,9 @@ func (r *commentViewerResource) Create(ctx context.Context, req resource.CreateR
 }
 
 func (r *commentViewerResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	if notConfigured(r.client, &resp.Diagnostics) {
+		return
+	}
 	var state commentViewerModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
@@ -109,6 +115,9 @@ func (r *commentViewerResource) Read(ctx context.Context, req resource.ReadReque
 }
 
 func (r *commentViewerResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	if notConfigured(r.client, &resp.Diagnostics) {
+		return
+	}
 	var plan, state commentViewerModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
