@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -12,20 +13,30 @@ import (
 //	func=getMasterData                                       -> data.masterDataTables
 //	func=saveMasterData&table=…&id=&col0=…&value0=…           -> empty id creates, a set id updates
 //
-// SCOPE: exactly one table, `cdb_bereich` (Bereiche/departments). A live
+// SCOPE: two tables. `cdb_bereich` (Bereiche/departments) was the first: a live
 // classification of all 24 tables found 15 with a REST write path — those stay
-// REST — and of the 9 without, Bereiche are the only one inside this tool's
-// structural mandate. Widening this needs the same live re-probe ct-cli's
+// REST — and of the 9 without, Bereiche were the only one inside this tool's
+// structural mandate at the time.
+//
+// `cdb_privacy_policy_agreement_types` joined in ct-structure#121 (Felix,
+// 2026-09-25: "everything that is defined needs to be in ct-structure"). It has
+// no REST endpoint at all; its write is the same call the ChurchTools admin UI
+// makes (Stammdaten → Datenschutz-Zustimmungsarten): cc_maintainstandardview.js
+// → renderEditEntry posts {func:"saveMasterData", table:<tablename>, id,
+// col0/value0…} via churchInterface.jsendWrite to churchdb/ajax.
+//
+// Widening this further needs the same live re-probe ct-cli's
 // runbook-manual-surface.md describes; the endpoint is undocumented.
 const (
-	MasterDataModule = "churchdb"
-	DepartmentTable  = "cdb_bereich"
+	MasterDataModule           = "churchdb"
+	DepartmentTable            = "cdb_bereich"
+	PrivacyAgreementTypesTable = "cdb_privacy_policy_agreement_types"
 )
 
 // writableTables is an allowlist, not a convenience. The legacy endpoint will
 // happily write any table it knows, including person master data this tool has
 // no mandate over.
-var writableTables = map[string]bool{DepartmentTable: true}
+var writableTables = map[string]bool{DepartmentTable: true, PrivacyAgreementTypesTable: true}
 
 type masterDataColumn struct {
 	Field string `json:"field"`
@@ -48,8 +59,8 @@ type masterDataEnvelope struct {
 func (c *Client) masterDataTable(ctx context.Context, tablename string) (masterDataTable, error) {
 	if !writableTables[tablename] {
 		return masterDataTable{}, fmt.Errorf(
-			"churchtools: refusing to write master-data table %q — this provider drives only %q",
-			tablename, DepartmentTable)
+			"churchtools: refusing to write master-data table %q — this provider drives only %q and %q",
+			tablename, DepartmentTable, PrivacyAgreementTypesTable)
 	}
 	var env masterDataEnvelope
 	if err := c.AjaxJSON(ctx, MasterDataModule, map[string]string{"func": "getMasterData"}, &env); err != nil {
@@ -115,4 +126,27 @@ func (c *Client) SaveMasterData(ctx context.Context, tablename string, fields ma
 	}
 
 	return c.Ajax(ctx, MasterDataModule, params)
+}
+
+// MasterDataRows reads one row set out of getMasterData's payload, keyed by the
+// row id as a string -- e.g. "privacy_policy_agreement_types", which has no REST
+// endpoint at all. READ-ONLY: the write allowlist above does not apply, and
+// nothing here can reach saveMasterData.
+//
+// The legacy payload encodes every value as a string ("sortkey": "20"); callers
+// parse what they need.
+func (c *Client) MasterDataRows(ctx context.Context, key string) (map[string]map[string]any, error) {
+	var env map[string]json.RawMessage
+	if err := c.AjaxJSON(ctx, MasterDataModule, map[string]string{"func": "getMasterData"}, &env); err != nil {
+		return nil, err
+	}
+	raw, ok := env[key]
+	if !ok {
+		return nil, fmt.Errorf("churchtools: getMasterData on this instance carries no %q", key)
+	}
+	var rows map[string]map[string]any
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil, fmt.Errorf("churchtools: getMasterData %q is not an id-keyed row set: %w", key, err)
+	}
+	return rows, nil
 }

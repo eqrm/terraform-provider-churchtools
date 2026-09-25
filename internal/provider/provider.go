@@ -148,6 +148,9 @@ func (p *churchtoolsProvider) Resources(_ context.Context) []func() resource.Res
 		NewDepartmentResource,
 		NewPersonStatusResource,
 		NewCommentViewerResource,
+		NewContactLabelResource,
+		NewRelationshipTypeResource,
+		NewPrivacyAgreementTypeResource,
 	}
 }
 

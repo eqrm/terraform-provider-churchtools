@@ -66,6 +66,20 @@ type Client struct {
 	sessionMu sync.Mutex
 	cookie    string
 	csrfToken string
+
+	// See LockMasterDataCreate.
+	masterDataCreateMu sync.Mutex
+}
+
+// LockMasterDataCreate serializes the snapshot -> saveMasterData -> diff
+// sequence a legacy Create uses to find its row, since saveMasterData returns
+// no id. Terraform creates independent resources in parallel, and two such
+// sequences that interleave each see both new rows and neither can claim one
+// -- leaving both rows orphaned in ChurchTools. Call the returned func to
+// unlock.
+func (c *Client) LockMasterDataCreate() func() {
+	c.masterDataCreateMu.Lock()
+	return c.masterDataCreateMu.Unlock
 }
 
 func New(baseURL, token string) *Client {
