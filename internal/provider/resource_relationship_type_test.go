@@ -51,6 +51,7 @@ func TestAccRelationshipType_BuiltInIsHostPortable(t *testing.T) {
 		{"sortKey": float64(10), "exportTitle": ""},
 	} {
 		mock := testmock.New()
+		t.Cleanup(mock.Close)
 		row := map[string]any{
 			"name":            "relationship.parent-child",
 			"degreeNameA":     "relationship.part.parent",
@@ -80,7 +81,6 @@ import {
 				{Config: config, PlanOnly: true},
 			},
 		})
-		mock.Close()
 	}
 }
 

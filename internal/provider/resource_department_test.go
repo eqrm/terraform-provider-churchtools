@@ -265,3 +265,22 @@ func TestMockHoldsTheLegacyEndpointToTheSession(t *testing.T) {
 		})
 	}
 }
+
+// Same snapshot→write→diff as privacy_agreement_type, same parallel hazard.
+func TestAccDepartment_ParallelCreatesEachFindTheirRow(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+
+	config := providerBlock(mock.URL)
+	for _, n := range []string{"a", "b", "c", "d", "e", "f"} {
+		config += `
+resource "churchtools_department" "` + n + `" {
+  name   = "Bereich ` + n + `"
+  shorty = "` + n + `"
+}`
+	}
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps:                    []resource.TestStep{{Config: config}},
+	})
+}

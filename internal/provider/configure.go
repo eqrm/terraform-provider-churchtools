@@ -19,19 +19,13 @@ import (
 // with no provider data yet, returning nil would otherwise wipe an already
 // configured client and panic the plugin on the next CRUD call.
 func configureClient(req resource.ConfigureRequest, resp *resource.ConfigureResponse, keep *client.Client) *client.Client {
-	return unwrapClient(req.ProviderData, &resp.Diagnostics, keep)
-}
-
-// unwrapClient is configureClient's body, shared with data sources, whose
-// Configure request is a different type carrying the same ProviderData.
-func unwrapClient(providerData any, diags *diag.Diagnostics, keep *client.Client) *client.Client {
-	if providerData == nil {
+	if req.ProviderData == nil {
 		return keep // provider not configured yet; the framework calls again later
 	}
-	data, ok := providerData.(*ProviderData)
+	data, ok := req.ProviderData.(*ProviderData)
 	if !ok {
-		diags.AddError(notConfiguredSummary,
-			fmt.Sprintf("Unerwarteter Provider-Datentyp: %T", providerData))
+		resp.Diagnostics.AddError(notConfiguredSummary,
+			fmt.Sprintf("Unerwarteter Provider-Datentyp: %T", req.ProviderData))
 		return keep
 	}
 	return data.Client

@@ -166,3 +166,44 @@ import {
 		t.Errorf("Privat took the default back: %v", p)
 	}
 }
+
+// The same hand-over with NO ordering between the two labels: Terraform runs
+// both updates at once, so privat's read of its current flag and its PUT can
+// straddle eltern's PUT unless the provider serializes them.
+func TestAccContactLabel_ParallelDefaultHandOver(t *testing.T) {
+	for i := 0; i < 5; i++ {
+		mock := testmock.New()
+		t.Cleanup(mock.Close)
+		mock.Seed("/contactlabels", 1, map[string]any{"name": "contact.label.private", "sortKey": float64(10), "isDefault": true})
+		mock.Seed("/contactlabels", 6, map[string]any{"name": "Eltern", "sortKey": float64(30), "isDefault": false})
+
+		config := func(privat, elternDefault string) string {
+			return providerBlock(mock.URL) + `
+resource "churchtools_contact_label" "eltern" {
+  name       = "Eltern"
+  is_default = ` + elternDefault + `
+}
+resource "churchtools_contact_label" "privat" {
+  name = "` + privat + `"
+}`
+		}
+		resource.Test(t, resource.TestCase{
+			ProtoV6ProviderFactories: protoV6(),
+			Steps: []resource.TestStep{
+				{Config: config("contact.label.private", "false") + `
+import {
+  to = churchtools_contact_label.privat
+  id = "1"
+}
+import {
+  to = churchtools_contact_label.eltern
+  id = "6"
+}`},
+				{Config: config("Privat", "true")},
+			},
+		})
+		if e := mock.Find("/contactlabels", "name", "Eltern"); e == nil || e["isDefault"] != true {
+			t.Fatalf("run %d: Eltern lost the default it was just given: %v", i, e)
+		}
+	}
+}

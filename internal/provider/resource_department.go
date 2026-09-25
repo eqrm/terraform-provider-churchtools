@@ -119,6 +119,7 @@ func (r *departmentResource) Create(ctx context.Context, req resource.CreateRequ
 		plan.SortKey = types.Int64Value(0)
 	}
 
+	defer r.client.LockMasterDataCreate()()
 	before, err := r.client.List(ctx, departmentCollection)
 	if err != nil {
 		resp.Diagnostics.AddError("Bereiche konnten nicht gelesen werden", err.Error())

@@ -121,3 +121,24 @@ resource "churchtools_privacy_agreement_type" "x" {
 		}},
 	})
 }
+
+// saveMasterData returns no id, so Create finds its row by diffing snapshots.
+// Terraform creates independent resources in PARALLEL; two snapshot→write→diff
+// sequences that interleave each see two new rows and neither can claim one.
+func TestAccPrivacyAgreementType_ParallelCreatesEachFindTheirRow(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedPrivacyTypes(mock)
+
+	config := providerBlock(mock.URL)
+	for _, n := range []string{"a", "b", "c", "d", "e", "f"} {
+		config += `
+resource "churchtools_privacy_agreement_type" "` + n + `" {
+  name = "Typ ` + n + `"
+}`
+	}
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps:                    []resource.TestStep{{Config: config}},
+	})
+}

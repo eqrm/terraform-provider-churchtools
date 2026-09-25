@@ -121,6 +121,7 @@ func (r *privacyAgreementTypeResource) Create(ctx context.Context, req resource.
 	if plan.SortKey.IsUnknown() || plan.SortKey.IsNull() {
 		plan.SortKey = types.Int64Value(0)
 	}
+	defer r.client.LockMasterDataCreate()()
 	before, err := r.rows(ctx)
 	if err != nil {
 		resp.Diagnostics.AddError("Zustimmungsarten konnten nicht gelesen werden", err.Error())
@@ -163,7 +164,12 @@ func (r *privacyAgreementTypeResource) Create(ctx context.Context, req resource.
 		return
 	}
 	plan.ID = types.StringValue(fresh[0])
-	r.fromRow(after[fresh[0]], &plan)
+	// Keep the planned name and sort_key, as department does: copying back what
+	// the legacy write stored would turn any server-side normalisation into
+	// "inconsistent result after apply" -- with the row already created. Only
+	// the column this provider never writes comes from ChurchTools.
+	deletable, _ := legacyInt(after[fresh[0]]["deletable"])
+	plan.Deletable = types.BoolValue(deletable == 1)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 

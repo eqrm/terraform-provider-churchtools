@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/eqrm/terraform-provider-churchtools/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -18,6 +19,12 @@ import (
 // "Arbeit", …). Full REST CRUD; PUT requires every field, so managed() always
 // sends all three.
 const contactLabelCollection = "/contactlabels"
+
+// contactLabelWrites serializes every label write. Making one label the default
+// unsets it on the others, and an unmanaged label's Update reads its current
+// flag before resending it; run in parallel, that read and PUT can straddle
+// another label's PUT and take the default straight back.
+var contactLabelWrites sync.Mutex
 
 type contactLabelResource struct{ client *client.Client }
 
@@ -91,6 +98,8 @@ func (r *contactLabelResource) Create(ctx context.Context, req resource.CreateRe
 	if plan.IsDefault.IsUnknown() || plan.IsDefault.IsNull() {
 		plan.IsDefault = types.BoolValue(false)
 	}
+	contactLabelWrites.Lock()
+	defer contactLabelWrites.Unlock()
 	row, err := r.client.Create(ctx, contactLabelCollection, r.managed(plan))
 	if err != nil {
 		resp.Diagnostics.AddError("Anlegen fehlgeschlagen", err.Error())
@@ -143,6 +152,8 @@ func (r *contactLabelResource) Update(ctx context.Context, req resource.UpdateRe
 	// PUT requires isDefault. Unmanaged, the plan leaves it unknown (see the
 	// schema), and CT's current value is the only one that does not undo another
 	// label becoming the default earlier in this apply.
+	contactLabelWrites.Lock()
+	defer contactLabelWrites.Unlock()
 	if plan.IsDefault.IsUnknown() {
 		row, err := r.client.Get(ctx, contactLabelCollection, state.ID.ValueString())
 		if err != nil {
