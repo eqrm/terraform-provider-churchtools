@@ -8,7 +8,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -54,11 +53,11 @@ func (r *contactLabelResource) Schema(_ context.Context, _ resource.SchemaReques
 			},
 			// Setting true makes CT UNSET the current default label instance-wide.
 			// Optional+Computed so an imported label keeps its flag unless the
-			// config says otherwise.
-			"is_default": schema.BoolAttribute{
-				Optional: true, Computed: true,
-				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
-			},
+			// config says otherwise. Deliberately NOT UseStateForUnknown: another
+			// label can take the default in the same apply, so the pre-apply
+			// value is not a promise this label's update can keep. Update asks
+			// CT instead.
+			"is_default": schema.BoolAttribute{Optional: true, Computed: true},
 		},
 	}
 }
@@ -141,6 +140,17 @@ func (r *contactLabelResource) Update(ctx context.Context, req resource.UpdateRe
 		return
 	}
 	plan.ID = state.ID
+	// PUT requires isDefault. Unmanaged, the plan leaves it unknown (see the
+	// schema), and CT's current value is the only one that does not undo another
+	// label becoming the default earlier in this apply.
+	if plan.IsDefault.IsUnknown() {
+		row, err := r.client.Get(ctx, contactLabelCollection, state.ID.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("Lesen fehlgeschlagen", err.Error())
+			return
+		}
+		plan.IsDefault = types.BoolValue(boolField(row, "isDefault"))
+	}
 	if _, err := r.client.Update(ctx, contactLabelCollection, state.ID.ValueString(), "PUT", r.managed(plan)); err != nil {
 		resp.Diagnostics.AddError("Aktualisieren fehlgeschlagen", err.Error())
 		return

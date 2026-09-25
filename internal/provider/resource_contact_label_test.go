@@ -119,3 +119,50 @@ resource "churchtools_contact_label" "x" {
 		}},
 	})
 }
+
+// Making another label the default unsets the current one on CT's side. A
+// label that leaves is_default unmanaged must not resend its pre-apply `true`
+// in the same apply, or it takes the default straight back.
+func TestAccContactLabel_UnmanagedDefaultDoesNotTakeItBack(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	mock.Seed("/contactlabels", 1, map[string]any{"name": "contact.label.private", "sortKey": float64(10), "isDefault": true})
+	mock.Seed("/contactlabels", 6, map[string]any{"name": "Eltern", "sortKey": float64(30), "isDefault": false})
+
+	config := func(privat, elternDefault string) string {
+		return providerBlock(mock.URL) + `
+resource "churchtools_contact_label" "eltern" {
+  name       = "Eltern"
+  is_default = ` + elternDefault + `
+}
+resource "churchtools_contact_label" "privat" {
+  name       = "` + privat + `"
+  depends_on = [churchtools_contact_label.eltern]
+}`
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: config("contact.label.private", "false") + `
+import {
+  to = churchtools_contact_label.privat
+  id = "1"
+}
+import {
+  to = churchtools_contact_label.eltern
+  id = "6"
+}`},
+			// eltern's PUT runs first (depends_on) and unsets privat; privat's
+			// rename then follows in the same apply.
+			{Config: config("Privat", "true")},
+		},
+	})
+
+	if e := mock.Find("/contactlabels", "name", "Eltern"); e == nil || e["isDefault"] != true {
+		t.Errorf("Eltern lost the default it was just given: %v", e)
+	}
+	if p := mock.Find("/contactlabels", "name", "Privat"); p == nil || p["isDefault"] != false {
+		t.Errorf("Privat took the default back: %v", p)
+	}
+}

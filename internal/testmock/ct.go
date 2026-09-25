@@ -78,6 +78,22 @@ func (s *Server) SeedLegacy(set, id string, row map[string]any) {
 	s.legacyRows[set][id] = row
 }
 
+// LegacyRows returns a copy of one getMasterData row set, so a test can assert
+// what a legacy write actually changed.
+func (s *Server) LegacyRows(set string) map[string]map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]map[string]any{}
+	for id, v := range s.legacyRows[set] {
+		row := map[string]any{}
+		for k, val := range v.(map[string]any) {
+			row[k] = val
+		}
+		out[id] = row
+	}
+	return out
+}
+
 // DropCreateID makes this collection's POST answer omit the id.
 func (s *Server) DropCreateID(collection string) {
 	s.mu.Lock()
@@ -306,6 +322,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.nextID++
 		body["id"] = float64(s.nextID)
 		s.rows[collection][strconv.Itoa(s.nextID)] = body
+		s.keepOneDefault(collection, strconv.Itoa(s.nextID), body)
 		if s.dropCreateID[collection] {
 			reply := map[string]any{}
 			for k, v := range body {
@@ -329,12 +346,26 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		for k, v := range body {
 			existing[k] = v
 		}
+		s.keepOneDefault(collection, id, body)
 		writeData(w, existing)
 	case r.Method == http.MethodDelete:
 		delete(s.rows[collection], id)
 		writeData(w, map[string]any{})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+// keepOneDefault models CT's single default contact label: writing
+// isDefault=true on one label unsets it on every other.
+func (s *Server) keepOneDefault(collection, id string, body map[string]any) {
+	if collection != "/contactlabels" || body["isDefault"] != true {
+		return
+	}
+	for other, row := range s.rows[collection] {
+		if other != id {
+			row.(map[string]any)["isDefault"] = false
+		}
 	}
 }
 
@@ -405,9 +436,25 @@ func (s *Server) handleLegacy(w http.ResponseWriter, r *http.Request) {
 					"sortkey":     map[string]any{"field": "sortkey"},
 				},
 			},
+			// Same columns as on both eqrm hosts (CT 3.137).
+			"31": map[string]any{
+				"id":        31,
+				"tablename": "cdb_privacy_policy_agreement_types",
+				"shortname": "privacy_policy_agreement_types",
+				"desc": map[string]any{
+					"id":          map[string]any{"field": "id"},
+					"bezeichnung": map[string]any{"field": "bezeichnung"},
+					"deletable":   map[string]any{"field": "deletable"},
+					"sortkey":     map[string]any{"field": "sortkey"},
+				},
+			},
 		}
 		writeStatus(payload)
 	case "saveMasterData":
+		if r.Form.Get("table") == "cdb_privacy_policy_agreement_types" {
+			s.savePrivacyAgreementType(r, writeStatus, writeErr)
+			return
+		}
 		if r.Form.Get("table") != "cdb_bereich" {
 			writeErr("unknown table " + r.Form.Get("table"))
 			return
@@ -453,4 +500,44 @@ func (s *Server) handleLegacy(w http.ResponseWriter, r *http.Request) {
 		// CT validates function names rather than ignoring unknown ones.
 		writeErr("Function " + r.Form.Get("func") + " was not defined as Function!")
 	}
+}
+
+// savePrivacyAgreementType mirrors CT's legacy write for
+// cdb_privacy_policy_agreement_types: an empty id creates (and answers with NO
+// id), a set id updates. Rows are stored the way getMasterData serves them —
+// every value a string — and a new custom row is deletable, like on CT.
+func (s *Server) savePrivacyAgreementType(r *http.Request, ok func(map[string]any), fail func(string)) {
+	const set = "privacy_policy_agreement_types"
+	cols := map[string]string{}
+	for n := 0; ; n++ {
+		col := r.Form.Get(fmt.Sprintf("col%d", n))
+		if col == "" {
+			break
+		}
+		cols[col] = r.Form.Get(fmt.Sprintf("value%d", n))
+	}
+	if s.legacyRows[set] == nil {
+		s.legacyRows[set] = map[string]any{}
+	}
+	if id := r.Form.Get("id"); id != "" {
+		existing, found := s.legacyRows[set][id]
+		if !found {
+			fail("no such row " + id)
+			return
+		}
+		row := existing.(map[string]any)
+		for k, v := range cols {
+			row[k] = v
+		}
+		ok(nil)
+		return
+	}
+	s.nextID++
+	id := strconv.Itoa(s.nextID)
+	row := map[string]any{"id": id, "deletable": "1", "sortkey": "0"}
+	for k, v := range cols {
+		row[k] = v
+	}
+	s.legacyRows[set][id] = row
+	ok(nil)
 }

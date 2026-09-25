@@ -150,13 +150,12 @@ func (p *churchtoolsProvider) Resources(_ context.Context) []func() resource.Res
 		NewCommentViewerResource,
 		NewContactLabelResource,
 		NewRelationshipTypeResource,
+		NewPrivacyAgreementTypeResource,
 	}
 }
 
 func (p *churchtoolsProvider) DataSources(_ context.Context) []func() datasource.DataSource {
-	return []func() datasource.DataSource{
-		NewPrivacyAgreementTypeDataSource,
-	}
+	return []func() datasource.DataSource{}
 }
 
 // validateHost rejects the two config mistakes that otherwise surface far away
