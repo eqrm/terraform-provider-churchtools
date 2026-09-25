@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -115,4 +116,27 @@ func (c *Client) SaveMasterData(ctx context.Context, tablename string, fields ma
 	}
 
 	return c.Ajax(ctx, MasterDataModule, params)
+}
+
+// MasterDataRows reads one row set out of getMasterData's payload, keyed by the
+// row id as a string -- e.g. "privacy_policy_agreement_types", which has no REST
+// endpoint at all. READ-ONLY: the write allowlist above does not apply, and
+// nothing here can reach saveMasterData.
+//
+// The legacy payload encodes every value as a string ("sortkey": "20"); callers
+// parse what they need.
+func (c *Client) MasterDataRows(ctx context.Context, key string) (map[string]map[string]any, error) {
+	var env map[string]json.RawMessage
+	if err := c.AjaxJSON(ctx, MasterDataModule, map[string]string{"func": "getMasterData"}, &env); err != nil {
+		return nil, err
+	}
+	raw, ok := env[key]
+	if !ok {
+		return nil, fmt.Errorf("churchtools: getMasterData on this instance carries no %q", key)
+	}
+	var rows map[string]map[string]any
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil, fmt.Errorf("churchtools: getMasterData %q is not an id-keyed row set: %w", key, err)
+	}
+	return rows, nil
 }

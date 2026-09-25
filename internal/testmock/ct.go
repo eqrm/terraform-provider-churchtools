@@ -27,10 +27,13 @@ type Server struct {
 	// credential actually authenticated, rather than that the mock ignored it.
 	requireCookie string
 	requireCSRF   string
+	// legacyRows are extra getMasterData row sets (e.g.
+	// "privacy_policy_agreement_types"), id -> row, served read-only.
+	legacyRows map[string]map[string]any
 }
 
 func New() *Server {
-	s := &Server{rows: map[string]map[string]any{}, nextID: 1000, dropCreateID: map[string]bool{}}
+	s := &Server{rows: map[string]map[string]any{}, nextID: 1000, dropCreateID: map[string]bool{}, legacyRows: map[string]map[string]any{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
 	return s
 }
@@ -61,6 +64,18 @@ func (s *Server) RequireSession(cookie, csrf string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.requireCookie, s.requireCSRF = cookie, csrf
+}
+
+// SeedLegacy installs a row in a getMasterData row set. Values are stored as
+// given; pass strings to reproduce the legacy payload, which stringifies numbers.
+func (s *Server) SeedLegacy(set, id string, row map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.legacyRows[set] == nil {
+		s.legacyRows[set] = map[string]any{}
+	}
+	row["id"] = id
+	s.legacyRows[set][id] = row
 }
 
 // DropCreateID makes this collection's POST answer omit the id.
@@ -133,6 +148,19 @@ var supportedVerbs = map[string]map[string]bool{
 		http.MethodGet:  true,
 		http.MethodPost: true,
 		http.MethodPut:  true,
+	},
+	// Both serve full CRUD on a live instance (CT 3.137 OpenAPI).
+	"/contactlabels": {
+		http.MethodGet:    true,
+		http.MethodPost:   true,
+		http.MethodPut:    true,
+		http.MethodDelete: true,
+	},
+	"/person/relationshiptypes": {
+		http.MethodGet:    true,
+		http.MethodPost:   true,
+		http.MethodPut:    true,
+		http.MethodDelete: true,
 	},
 	// Bereiche are READ-ONLY over REST, and there is no GET by id either: CT
 	// serves the collection and nothing else. Every write goes through the
@@ -363,19 +391,22 @@ func (s *Server) handleLegacy(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Form.Get("func") {
 	case "getMasterData":
-		writeStatus(map[string]any{
-			"masterDataTables": map[string]any{
-				"7": map[string]any{
-					"id":        7,
-					"tablename": "cdb_bereich",
-					"desc": map[string]any{
-						"bezeichnung": map[string]any{"field": "bezeichnung"},
-						"kuerzel":     map[string]any{"field": "kuerzel"},
-						"sortkey":     map[string]any{"field": "sortkey"},
-					},
+		payload := map[string]any{}
+		for set, rows := range s.legacyRows {
+			payload[set] = rows
+		}
+		payload["masterDataTables"] = map[string]any{
+			"7": map[string]any{
+				"id":        7,
+				"tablename": "cdb_bereich",
+				"desc": map[string]any{
+					"bezeichnung": map[string]any{"field": "bezeichnung"},
+					"kuerzel":     map[string]any{"field": "kuerzel"},
+					"sortkey":     map[string]any{"field": "sortkey"},
 				},
 			},
-		})
+		}
+		writeStatus(payload)
 	case "saveMasterData":
 		if r.Form.Get("table") != "cdb_bereich" {
 			writeErr("unknown table " + r.Form.Get("table"))

@@ -18,8 +18,10 @@ campus "mainz" {
 
 ## Status
 
-Pre-release. Tier-0 master data (campus, group type, department, person status,
-comment viewer) only.
+Pre-release. Tier-0 master data only: campus, group type, department, person
+status, comment viewer, contact label and relationship type as resources, plus
+privacy-policy agreement types as a read-only data source
+(`churchtools_privacy_agreement_type`).
 
 Nothing is ever deleted: every resource's `Delete` refuses and directs the
 operator to the ChurchTools UI instead.
@@ -47,12 +49,21 @@ Worth stating plainly, because "it has tests" and "its writes work" are differen
 claims here.
 
 Every type's **read** path is exercised against a live ChurchTools instance, and
-the acceptance tests cover all five types against an in-process mock. The
+the acceptance tests cover all seven resource types and the data source against an
+in-process mock. The
 **write** path is the interesting one: `campus`, `group_type`, `person_status` and
 `comment_viewer` go through the REST API, but `department` (Bereich) has no REST
 write path at all and goes through ChurchTools' legacy master-data endpoint
 (`churchdb/ajax`, `cdb_bereich`) — which needs a session handshake rather than the
 token header, returns no id on create, and accepts an unknown column silently.
+
+`contact_label` (`/contactlabels`) and `relationship_type` (`/person/relationshiptypes`)
+are plain REST with full CRUD; their field contracts were taken from a live instance's
+OpenAPI spec (CT 3.137). Privacy-policy agreement types have **no** REST endpoint, so
+`churchtools_privacy_agreement_type` reads the legacy `getMasterData` row set
+`privacy_policy_agreement_types` and resolves one row by its stored name. It is read-only
+on purpose: writing that table would mean widening the legacy write allowlist, which is
+still limited to `cdb_bereich`.
 
 That legacy path was verified end to end against a live instance on 2026-09-21:
 `name`, `shorty` and `sort_key` all land, each read back through a separate client
