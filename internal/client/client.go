@@ -243,6 +243,11 @@ func unwrap(raw []byte, into any) error {
 // caller can inspect `meta.pagination`.
 func unwrapEnvelope(raw []byte, into any) (envelope, error) {
 	var env envelope
+	// A 204 has no body at all — CT answers PUT on /group/targetgroups and
+	// /group/agegroups that way. No body is no data, not a decoding error.
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return env, nil
+	}
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return env, fmt.Errorf("churchtools: decoding response envelope: %w", err)
 	}

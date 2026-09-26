@@ -185,6 +185,29 @@ var supportedVerbs = map[string]map[string]bool{
 	"/departments": {
 		http.MethodGet: true,
 	},
+	// Group master data. Every verb here was verified against a LIVE eqrm-dev
+	// (CT 3.137.0-RC20) on 2026-09-26 rather than read off a spec: POST answers
+	// 201 with data.id, DELETE 204. DELETE additionally REQUIRES an explicit
+	// dryRun=TRUE|FALSE query parameter — omitting it is a 400, not a default —
+	// which nothing here exercises, because every resource orphans on destroy.
+	"/group/targetgroups": {
+		http.MethodGet:    true,
+		http.MethodPost:   true,
+		http.MethodPut:    true, // 204, no body
+		http.MethodDelete: true,
+	},
+	"/group/agegroups": {
+		http.MethodGet:    true,
+		http.MethodPost:   true,
+		http.MethodPut:    true, // 204, no body
+		http.MethodDelete: true,
+	},
+	"/group/groupcategories": {
+		http.MethodGet:    true,
+		http.MethodPost:   true,
+		http.MethodPut:    true, // 200 WITH a body, unlike the two above
+		http.MethodDelete: true,
+	},
 	// The session handshake the legacy endpoint requires.
 	"/whoami":    {http.MethodGet: true},
 	"/csrftoken": {http.MethodGet: true},
@@ -347,6 +370,10 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			existing[k] = v
 		}
 		s.keepOneDefault(collection, id, body)
+		if putNoContent[collection] {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		writeData(w, existing)
 	case r.Method == http.MethodDelete:
 		delete(s.rows[collection], id)
@@ -354,6 +381,14 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// putNoContent lists the collections whose live PUT answers 204 with an EMPTY
+// body rather than the updated row. Answering those with a body here is what
+// let an Update that choked on "" pass every test.
+var putNoContent = map[string]bool{
+	"/group/targetgroups": true,
+	"/group/agegroups":    true,
 }
 
 // keepOneDefault models CT's single default contact label: writing
