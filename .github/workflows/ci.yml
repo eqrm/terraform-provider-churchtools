@@ -1,8 +1,25 @@
 name: CI
 on:
+  # Markdown and the licence feed neither the build nor the tests nor the goreleaser
+  # config. Nothing here is a required status check; if CI ever becomes one, drop
+  # these filters, or a docs-only PR would wait forever on a check that never runs.
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+
+# A newer push to the same PR supersedes the run in flight, so cancel it rather than
+# let both occupy the org's concurrent-job slots. Pushes to main are never cancelled:
+# every main commit keeps its own result.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
