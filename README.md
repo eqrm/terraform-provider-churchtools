@@ -172,3 +172,4 @@ Until step 2 is done, releases build and sign correctly and are still unusable.
 
 [MPL-2.0](LICENSE) — the licence OpenTofu itself and every HashiCorp provider
 use.
+
