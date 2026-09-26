@@ -1,6 +1,7 @@
 package provider_test
 
 import (
+	"fmt"
 	"regexp"
 	"testing"
 
@@ -187,4 +188,59 @@ resource "churchtools_privacy_agreement_who" "own" {
 			{Config: cfg, PlanOnly: true},
 		},
 	})
+}
+
+// ChurchTools answers PUT on /group/targetgroups and /group/agegroups with 204
+// and NO body. An update must treat that as success, not fail decoding "".
+func TestAccTargetGroup_UpdateAccepts204(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+
+	cfg := func(name string) string {
+		return providerBlock(mock.URL) + `
+resource "churchtools_target_group" "tg" {
+  name     = "` + name + `"
+  sort_key = 5
+}`
+	}
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: cfg("Alt")},
+			{
+				Config: cfg("Neu"),
+				Check:  resource.TestCheckResourceAttr("churchtools_target_group.tg", "name", "Neu"),
+			},
+		},
+	})
+	if mock.Find("/group/targetgroups", "name", "Neu") == nil {
+		t.Fatal("rename did not reach the mock")
+	}
+}
+
+func TestAccAgeGroup_UpdateAccepts204(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+
+	cfg := func(end int) string {
+		return providerBlock(mock.URL) + fmt.Sprintf(`
+resource "churchtools_age_group" "ag" {
+  name  = "Kids"
+  start = 0
+  end   = %d
+}`, end)
+	}
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: cfg(12)},
+			{
+				Config: cfg(14),
+				Check:  resource.TestCheckResourceAttr("churchtools_age_group.ag", "end", "14"),
+			},
+		},
+	})
+	if row := mock.Find("/group/agegroups", "name", "Kids"); row == nil || row["end"] != float64(14) {
+		t.Fatalf("update did not reach the mock: %v", row)
+	}
 }

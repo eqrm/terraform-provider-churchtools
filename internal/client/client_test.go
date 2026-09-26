@@ -473,3 +473,16 @@ func TestNilClient_IsAnErrorNotAPanic(t *testing.T) {
 		t.Errorf("Ajax on a nil client: %v, want ErrNotConfigured", err)
 	}
 }
+
+// CT answers some PUTs with 204 and no body at all. That is success; decoding
+// the empty body as JSON must not turn it into an error.
+func TestUpdate_NoContentIsSuccess(t *testing.T) {
+	c, done := newTestClient(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer done()
+
+	if _, err := c.Update(context.Background(), "/group/targetgroups", "1", http.MethodPut, Row{"name": "x"}); err != nil {
+		t.Fatalf("err = %v, want nil for a 204", err)
+	}
+}
