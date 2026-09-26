@@ -20,8 +20,9 @@ resource "churchtools_campus" "mainz" {
 ## Status
 
 Pre-release. Tier-0 master data only: campus, group type, department, person
-status, comment viewer, contact label, relationship type and privacy-policy
-agreement type.
+status, comment viewer, contact label, relationship type, privacy-policy
+agreement type, privacy-agreement "who", target group, age group and group
+category.
 
 Nothing is ever deleted in ChurchTools. Every resource's `Delete` **un-manages**
 the object instead: it drops it from state, leaves it untouched in ChurchTools,
