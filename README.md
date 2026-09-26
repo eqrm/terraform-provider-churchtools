@@ -6,11 +6,12 @@ campuses, group types, departments, person statuses, groups and permissions.
 It manages the *scaffold* only. People, memberships and participants are out of
 scope and are never read or written.
 
-Resource type names are bare (`campus`, not `churchtools_campus`), because a
-ChurchTools structure config is 100% this provider and the prefix is noise.
+Resource type names carry the provider prefix (`churchtools_campus`), as
+Terraform and OpenTofu require: the framework derives every type name from the
+provider name.
 
 ```hcl
-campus "mainz" {
+resource "churchtools_campus" "mainz" {
   name   = "Mainz"
   shorty = "MZ"
 }
@@ -19,11 +20,14 @@ campus "mainz" {
 ## Status
 
 Pre-release. Tier-0 master data only: campus, group type, department, person
-status, comment viewer, contact label, relationship type and privacy-policy
-agreement type.
+status, comment viewer, contact label, relationship type, privacy-policy
+agreement type, privacy-agreement "who", target group, age group and group
+category.
 
-Nothing is ever deleted: every resource's `Delete` refuses and directs the
-operator to the ChurchTools UI instead.
+Nothing is ever deleted in ChurchTools. Every resource's `Delete` **un-manages**
+the object instead: it drops it from state, leaves it untouched in ChurchTools,
+and emits a warning that points the operator to the ChurchTools UI if it should
+really go.
 
 ## Install
 
@@ -71,8 +75,8 @@ by the mock, and its first real run is ct-structure's CI apply on eqrm-dev.
 That legacy path was verified end to end against a live instance on 2026-09-21:
 `name`, `shorty` and `sort_key` all land, each read back through a separate client
 rather than through the provider that wrote it. A Bereich **create** has never been
-exercised (nothing needed one) and a **delete** never will be, since Delete
-refuses by design.
+exercised (nothing needed one) and a **delete** never will be, since Delete only
+un-manages by design.
 
 ## Authentication
 
@@ -97,10 +101,10 @@ provider "churchtools" {
 }
 ```
 
-Pass `--env`. `data "external"` requires every value in the JSON object to be a
-string, and `ct auth token` reports `environment: null` when no environment was
-selected — which fails inside the external provider with a message about JSON
-types rather than anything naming the cause.
+Pass `--env` so the token is for the instance you mean. (Before ct-cli 3.10.1,
+`--env` was also the workaround for `environment: null`, which `data "external"`
+rejects because every value must be a string. Since eqrm/ct-cli#184 the field is
+`""` when no environment is selected.)
 
 Sessions expire, and ChurchTools does not advertise how long they last — the
 `expiresAt` ct-cli reports is a ceiling, not a promise. The provider cannot
