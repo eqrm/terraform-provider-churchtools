@@ -185,6 +185,29 @@ var supportedVerbs = map[string]map[string]bool{
 	"/departments": {
 		http.MethodGet: true,
 	},
+	// Group master data. Every verb here was verified against a LIVE eqrm-dev
+	// (CT 3.137.0-RC20) on 2026-09-26 rather than read off a spec: POST answers
+	// 201 with data.id, DELETE 204. DELETE additionally REQUIRES an explicit
+	// dryRun=TRUE|FALSE query parameter — omitting it is a 400, not a default —
+	// which nothing here exercises, because every resource orphans on destroy.
+	"/group/targetgroups": {
+		http.MethodGet:    true,
+		http.MethodPost:   true,
+		http.MethodPut:    true, // 204, no body
+		http.MethodDelete: true,
+	},
+	"/group/agegroups": {
+		http.MethodGet:    true,
+		http.MethodPost:   true,
+		http.MethodPut:    true, // 204, no body
+		http.MethodDelete: true,
+	},
+	"/group/groupcategories": {
+		http.MethodGet:    true,
+		http.MethodPost:   true,
+		http.MethodPut:    true, // 200 WITH a body, unlike the two above
+		http.MethodDelete: true,
+	},
 	// The session handshake the legacy endpoint requires.
 	"/whoami":    {http.MethodGet: true},
 	"/csrftoken": {http.MethodGet: true},

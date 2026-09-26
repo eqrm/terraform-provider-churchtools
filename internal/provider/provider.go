@@ -151,6 +151,10 @@ func (p *churchtoolsProvider) Resources(_ context.Context) []func() resource.Res
 		NewContactLabelResource,
 		NewRelationshipTypeResource,
 		NewPrivacyAgreementTypeResource,
+		NewPrivacyAgreementWhoResource,
+		NewTargetGroupResource,
+		NewAgeGroupResource,
+		NewGroupCategoryResource,
 	}
 }
 
