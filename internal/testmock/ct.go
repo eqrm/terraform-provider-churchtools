@@ -30,10 +30,13 @@ type Server struct {
 	// legacyRows are extra getMasterData row sets (e.g.
 	// "privacy_policy_agreement_types"), id -> row, served read-only.
 	legacyRows map[string]map[string]any
+	// lastPut is the most recent PUT body per collection, verbatim, so a test
+	// can assert what went over the wire rather than the merged row.
+	lastPut map[string]map[string]any
 }
 
 func New() *Server {
-	s := &Server{rows: map[string]map[string]any{}, nextID: 1000, dropCreateID: map[string]bool{}, legacyRows: map[string]map[string]any{}}
+	s := &Server{rows: map[string]map[string]any{}, nextID: 1000, dropCreateID: map[string]bool{}, legacyRows: map[string]map[string]any{}, lastPut: map[string]map[string]any{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
 	return s
 }
@@ -90,6 +93,21 @@ func (s *Server) LegacyRows(set string) map[string]map[string]any {
 			row[k] = val
 		}
 		out[id] = row
+	}
+	return out
+}
+
+// LastPut returns a copy of the most recent PUT body sent to a collection, or
+// nil if there was none.
+func (s *Server) LastPut(collection string) map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastPut[collection] == nil {
+		return nil
+	}
+	out := map[string]any{}
+	for k, v := range s.lastPut[collection] {
+		out[k] = v
 	}
 	return out
 }
@@ -206,6 +224,13 @@ var supportedVerbs = map[string]map[string]bool{
 		http.MethodGet:    true,
 		http.MethodPost:   true,
 		http.MethodPut:    true, // 200 WITH a body, unlike the two above
+		http.MethodDelete: true,
+	},
+	// Data fields. Measured on eqrm-dev (CT 3.137) on 2026-09-29: PATCH answers
+	// "Must be one of: GET, PUT, DELETE", and PUT replaces (see putRequired).
+	"/dbfields": {
+		http.MethodGet:    true,
+		http.MethodPut:    true,
 		http.MethodDelete: true,
 	},
 	// The session handshake the legacy endpoint requires.
@@ -365,6 +390,14 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
+		if r.Method == http.MethodPut {
+			s.lastPut[collection] = body
+			if missing := missingKeys(body, putRequired[collection]); len(missing) > 0 {
+				w.WriteHeader(http.StatusBadRequest)
+				writeData(w, map[string]any{"message": "There are validation errors", "missing": missing})
+				return
+			}
+		}
 		existing := row.(map[string]any)
 		for k, v := range body {
 			existing[k] = v
@@ -389,6 +422,25 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 var putNoContent = map[string]bool{
 	"/group/targetgroups": true,
 	"/group/agegroups":    true,
+}
+
+// putRequired lists, per collection, the keys a live PUT rejects the body
+// without. On /dbfields a partial PUT {isNewPersonField} is a 400 naming
+// useAsPlaceholder, securityLevel, sortKey and deleteOnArchive (eqrm-dev,
+// 2026-09-29) — a PUT there REPLACES, so an Update that sends only the managed
+// attribute must fail here as it does on the instance.
+var putRequired = map[string][]string{
+	"/dbfields": {"useAsPlaceholder", "securityLevel", "sortKey", "deleteOnArchive"},
+}
+
+func missingKeys(body map[string]any, required []string) []string {
+	var missing []string
+	for _, k := range required {
+		if _, ok := body[k]; !ok {
+			missing = append(missing, k)
+		}
+	}
+	return missing
 }
 
 // keepOneDefault models CT's single default contact label: writing

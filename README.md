@@ -22,7 +22,7 @@ resource "churchtools_campus" "mainz" {
 Pre-release. Tier-0 master data only: campus, group type, department, person
 status, comment viewer, contact label, relationship type, privacy-policy
 agreement type, privacy-agreement "who", target group, age group and group
-category.
+category — plus `db_field`, which manages one setting of an existing data field.
 
 Nothing is ever deleted in ChurchTools. Every resource's `Delete` **un-manages**
 the object instead: it drops it from state, leaves it untouched in ChurchTools,
@@ -77,6 +77,17 @@ That legacy path was verified end to end against a live instance on 2026-09-21:
 rather than through the provider that wrote it. A Bereich **create** has never been
 exercised (nothing needed one) and a **delete** never will be, since Delete only
 un-manages by design.
+
+`db_field` (`/dbfields/{id}`) is **import-only** and manages exactly one setting of
+a data field that already exists: `is_new_person_field` ("Beim Anlegen einer Person
+abfragen"); `key` is read-only. Create refuses and points at an `import` block. The
+write contract was measured on eqrm-dev (CT 3.137.0-RC22) on 2026-09-29: there is no PATCH
+(405, "Must be one of: GET, PUT, DELETE"), and a partial PUT is a 400 because PUT
+replaces. Update therefore GETs the field and PUTs back the OpenAPI request keys
+(`id, name, shorty, length, lineEnding, securityLevel, sortKey, isActive,
+useAsPlaceholder, isNewPersonField, deleteOnArchive`) with only the flag changed. On
+dev that body was a verified no-op on three fields (GET before/after identical), and a
+real toggle of field 32 landed and was restored.
 
 ## Authentication
 
