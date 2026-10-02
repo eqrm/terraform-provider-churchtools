@@ -67,6 +67,8 @@ func TestAccDBField_ImportReads(t *testing.T) {
 					resource.TestCheckResourceAttr("churchtools_db_field.status", "id", "32"),
 					resource.TestCheckResourceAttr("churchtools_db_field.status", "key", "statusId"),
 					resource.TestCheckResourceAttr("churchtools_db_field.status", "is_new_person_field", "false"),
+					// Left out of the config, is_active reads the instance's value.
+					resource.TestCheckResourceAttr("churchtools_db_field.status", "is_active", "true"),
 				),
 			},
 			{Config: cfg, PlanOnly: true},
@@ -130,6 +132,99 @@ func TestAccDBField_UpdateSendsFullBodyChangingOnlyTheFlag(t *testing.T) {
 	if row == nil || row["isNewPersonField"] != false {
 		t.Fatalf("flag did not land on the mock: %v", row)
 	}
+}
+
+// seedJobField installs data field 19 (job, "Beruf") as eqrm-dev returns it — the
+// shape IT-29 switches off. Trimmed to the keys Update reads plus one nested
+// read-only object, which must not reach the PUT.
+func seedJobField(mock *testmock.Server) {
+	mock.Seed("/dbfields", 19, map[string]any{
+		"name":             "profession",
+		"shorty":           "profession",
+		"key":              "job",
+		"length":           float64(50),
+		"fieldCategory":    map[string]any{"id": float64(2), "name": "information"},
+		"isActive":         true,
+		"useAsPlaceholder": false,
+		"isNewPersonField": false,
+		"lineEnding":       "<br/>",
+		"securityLevel":    float64(3),
+		"sortKey":          float64(4),
+		"deleteOnArchive":  false,
+	})
+}
+
+func jobFieldConfig(host, isActive string) string {
+	attr := ""
+	if isActive != "" {
+		attr = "\n  is_active = " + isActive
+	}
+	return providerBlock(host) + `
+import {
+  to = churchtools_db_field.job
+  id = "19"
+}
+resource "churchtools_db_field" "job" {
+  is_new_person_field = false` + attr + `
+}`
+}
+
+// IT-29: importing a field with is_active = false switches it off in the same
+// apply, through the full PUT body, and leaves isNewPersonField alone.
+func TestAccDBField_ImportDeactivates(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedJobField(mock)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{
+				Config: jobFieldConfig(mock.URL, "false"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("churchtools_db_field.job", "key", "job"),
+					resource.TestCheckResourceAttr("churchtools_db_field.job", "is_active", "false"),
+				),
+			},
+			{Config: jobFieldConfig(mock.URL, "false"), PlanOnly: true},
+		},
+	})
+
+	want := map[string]any{
+		"id":               float64(19),
+		"name":             "profession",
+		"shorty":           "profession",
+		"length":           float64(50),
+		"lineEnding":       "<br/>",
+		"securityLevel":    float64(3),
+		"sortKey":          float64(4),
+		"isActive":         false,
+		"useAsPlaceholder": false,
+		"isNewPersonField": false,
+		"deleteOnArchive":  false,
+	}
+	if got := mock.LastPut("/dbfields"); !reflect.DeepEqual(got, want) {
+		t.Errorf("PUT body = %v\nwant       %v", got, want)
+	}
+	if row := mock.Find("/dbfields", "key", "job"); row == nil || row["isActive"] != false {
+		t.Fatalf("isActive did not land on the mock: %v", row)
+	}
+}
+
+// Dropping is_active from the config after managing it keeps the last value
+// (Optional+Computed): no plan, no PUT that would silently re-activate.
+func TestAccDBField_OmittedIsActiveKeepsState(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedJobField(mock)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: jobFieldConfig(mock.URL, "false")},
+			{Config: jobFieldConfig(mock.URL, ""), PlanOnly: true},
+		},
+	})
 }
 
 // Data fields are never created by this provider: Create refuses and points at
