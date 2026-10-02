@@ -419,13 +419,14 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		existing := row.(map[string]any)
 		ignored := s.ignoreOnPut[collection+"/"+id]
+		stored := map[string]any{}
 		for k, v := range body {
-			if ignored[k] {
-				continue
+			if !ignored[k] {
+				stored[k] = v
+				existing[k] = v
 			}
-			existing[k] = v
 		}
-		s.keepOneDefault(collection, id, body)
+		s.keepOneDefault(collection, id, stored)
 		if putNoContent[collection] {
 			w.WriteHeader(http.StatusNoContent)
 			return

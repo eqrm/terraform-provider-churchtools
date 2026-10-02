@@ -216,18 +216,22 @@ func (r *dbFieldResource) Update(ctx context.Context, req resource.UpdateRequest
 	for _, f := range []struct {
 		key, attr string
 		want      bool
+		// hint is the way out; is_new_person_field is Required, so it can't be dropped.
+		hint string
 	}{
-		{"isNewPersonField", "is_new_person_field", plan.IsNewPersonField.ValueBool()},
-		{"isActive", "is_active", isActive},
+		{"isNewPersonField", "is_new_person_field", plan.IsNewPersonField.ValueBool(),
+			"Setze is_new_person_field auf %t."},
+		{"isActive", "is_active", isActive,
+			"So sperrt ChurchTools „Aktiv“ bei Beruf, Geburtsort und Nationalität. " +
+				"Entferne is_active aus der Konfiguration oder setze ihn auf %t."},
 	} {
 		if got := boolField(after, f.key); got != f.want {
 			resp.Diagnostics.AddError(
 				"ChurchTools hat die Änderung ignoriert",
-				fmt.Sprintf("PUT /dbfields/%s mit %s = %t wurde angenommen, das Feld steht danach aber "+
-					"weiter auf %t. ChurchTools sperrt diese Einstellung bei manchen eingebauten Feldern "+
-					"(in der Oberfläche ist die Checkbox ausgegraut), so bei „Aktiv“ für Beruf, Geburtsort "+
-					"und Nationalität. Entferne %s aus der Konfiguration oder setze ihn auf %t.",
-					id, f.attr, f.want, got, f.attr, got))
+				fmt.Sprintf("PUT %s/%s mit %s = %t wurde angenommen, das Feld steht danach aber "+
+					"weiter auf %t. ChurchTools sperrt manche Einstellungen bei eingebauten Feldern "+
+					"(in der Oberfläche ist die Checkbox ausgegraut). ",
+					dbFieldCollection, id, f.attr, f.want, got)+fmt.Sprintf(f.hint, got))
 		}
 	}
 	if resp.Diagnostics.HasError() {

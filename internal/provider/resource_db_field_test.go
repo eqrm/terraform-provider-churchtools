@@ -230,14 +230,36 @@ func TestAccDBField_LockedIsActiveFails(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:      jobFieldConfig(mock.URL, "false"),
-				ExpectError: regexp.MustCompile(`ChurchTools hat die Änderung ignoriert`),
+				ExpectError: regexp.MustCompile(`(?s)ChurchTools hat die Änderung ignoriert.*Entferne\s+is_active`),
 			},
+			// The error's own advice: dropping is_active applies cleanly and stays clean.
+			{Config: jobFieldConfig(mock.URL, "")},
+			{Config: jobFieldConfig(mock.URL, ""), PlanOnly: true},
 		},
 	})
 
 	if row := mock.Find("/dbfields", "key", "job"); row == nil || row["isActive"] != true {
 		t.Fatalf("locked isActive changed on the mock: %v", row)
 	}
+}
+
+// The same read-back guards is_new_person_field. It is Required, so the error
+// must not advise removing it from the config.
+func TestAccDBField_IgnoredNewPersonFieldFails(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedStatusField(mock, false)
+	mock.IgnoreOnPut("/dbfields", 32, "isNewPersonField")
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{
+				Config:      dbFieldConfig(mock.URL, "true"),
+				ExpectError: regexp.MustCompile(`(?s)ChurchTools hat die Änderung ignoriert.*Setze\s+is_new_person_field\s+auf\s+false`),
+			},
+		},
+	})
 }
 
 // Dropping is_active from the config after managing it keeps the last value
