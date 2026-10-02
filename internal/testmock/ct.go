@@ -33,10 +33,15 @@ type Server struct {
 	// lastPut is the most recent PUT body per collection, verbatim, so a test
 	// can assert what went over the wire rather than the merged row.
 	lastPut map[string]map[string]any
+	// ignoreOnPut lists, per "collection/id", keys a PUT answers 200 to but does
+	// not store. Live CT does this with isActive on built-in data fields such as
+	// job (19): the "Aktiv" checkbox is locked in its own UI, and the PUT reply
+	// already carries the old value (eqrm-dev, 2026-10-02).
+	ignoreOnPut map[string]map[string]bool
 }
 
 func New() *Server {
-	s := &Server{rows: map[string]map[string]any{}, nextID: 1000, dropCreateID: map[string]bool{}, legacyRows: map[string]map[string]any{}, lastPut: map[string]map[string]any{}}
+	s := &Server{rows: map[string]map[string]any{}, nextID: 1000, dropCreateID: map[string]bool{}, legacyRows: map[string]map[string]any{}, lastPut: map[string]map[string]any{}, ignoreOnPut: map[string]map[string]bool{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
 	return s
 }
@@ -117,6 +122,20 @@ func (s *Server) DropCreateID(collection string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.dropCreateID[collection] = true
+}
+
+// IgnoreOnPut makes a PUT to collection/id accept these keys without storing
+// them, the way CT treats isActive on a locked built-in data field.
+func (s *Server) IgnoreOnPut(collection string, id int, keys ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := collection + "/" + strconv.Itoa(id)
+	if s.ignoreOnPut[k] == nil {
+		s.ignoreOnPut[k] = map[string]bool{}
+	}
+	for _, key := range keys {
+		s.ignoreOnPut[k][key] = true
+	}
 }
 
 // Find returns the first row in a collection whose `field` equals `value`, so
@@ -399,7 +418,11 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		existing := row.(map[string]any)
+		ignored := s.ignoreOnPut[collection+"/"+id]
 		for k, v := range body {
+			if ignored[k] {
+				continue
+			}
 			existing[k] = v
 		}
 		s.keepOneDefault(collection, id, body)
