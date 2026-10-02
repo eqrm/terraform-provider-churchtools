@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -16,11 +17,17 @@ import (
 // A ChurchTools data field (Datenfeld, /dbfields) — the definition of a column
 // on the person or group record, not any person's value in it.
 //
-// IMPORT-ONLY, and it manages exactly ONE setting: isNewPersonField ("Beim
-// Anlegen einer Person abfragen"). The fields this exists for are ChurchTools
-// built-ins (statusId, id 32, is the reason: ct-structure hides it from the
-// create-person dialog, IT-8), so Create refuses rather than POSTing a custom
-// field, and Delete orphans like every other resource here.
+// IMPORT-ONLY, and it manages exactly TWO settings: isNewPersonField ("Beim
+// Anlegen einer Person abfragen") and isActive ("Aktiv"). The fields this exists
+// for are ChurchTools built-ins (statusId, id 32, is the reason for the first:
+// ct-structure hides it from the create-person dialog, IT-8; birthplace, job and
+// nationalityId for the second: IT-29 switches them off), so Create refuses
+// rather than POSTing a custom field, and Delete orphans like every other
+// resource here.
+//
+// is_active is Optional+Computed: a config that leaves it out keeps whatever the
+// instance has, so the statusId import from before this attribute existed plans
+// no change. A built-in CAN be inactive — eqrm-dev ships isSystemUser that way.
 //
 // The write contract was measured on eqrm-dev (CT 3.137.0-RC22) on 2026-09-29, not
 // read off the spec alone:
@@ -41,8 +48,9 @@ const dbFieldCollection = "/dbfields"
 // dbFieldPutKeys is the PUT /dbfields/{id} request body per the CT OpenAPI spec:
 // required deleteOnArchive, isActive, isNewPersonField, lineEnding, name,
 // securityLevel, sortKey, useAsPlaceholder; optional length, shorty; plus id.
-// Every value except isNewPersonField is copied from a GET made immediately
-// before the PUT, so the write changes nothing this resource does not manage.
+// Every value except isNewPersonField and isActive is copied from a GET made
+// immediately before the PUT, so the write changes nothing this resource does
+// not manage.
 var dbFieldPutKeys = []string{
 	"id",
 	"name",
@@ -63,6 +71,7 @@ type dbFieldModel struct {
 	ID               types.String `tfsdk:"id"`
 	Key              types.String `tfsdk:"key"`
 	IsNewPersonField types.Bool   `tfsdk:"is_new_person_field"`
+	IsActive         types.Bool   `tfsdk:"is_active"`
 }
 
 func NewDBFieldResource() resource.Resource { return &dbFieldResource{} }
@@ -75,7 +84,7 @@ func (r *dbFieldResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 	resp.Schema = schema.Schema{
 		Description: "Eine Einstellung eines vorhandenen ChurchTools-Datenfelds. Nur importierbar: " +
 			"der Provider legt keine Datenfelder an und löscht keine, er verwaltet nur " +
-			"„Beim Anlegen einer Person abfragen“ (is_new_person_field).",
+			"„Beim Anlegen einer Person abfragen“ (is_new_person_field) und „Aktiv“ (is_active).",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,
@@ -88,6 +97,12 @@ func (r *dbFieldResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 			"is_new_person_field": schema.BoolAttribute{Required: true},
+			// Optional: left out, the instance's value is kept (see the type comment).
+			"is_active": schema.BoolAttribute{
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+			},
 		},
 	}
 }
@@ -130,14 +145,15 @@ func (r *dbFieldResource) Read(ctx context.Context, req resource.ReadRequest, re
 	}
 	state.Key = types.StringValue(stringField(row, "key"))
 	state.IsNewPersonField = types.BoolValue(boolField(row, "isNewPersonField"))
+	state.IsActive = types.BoolValue(boolField(row, "isActive"))
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }
 
 // dbFieldPutBody builds the full PUT body from a fresh GET: CT has no PATCH here and a
 // partial PUT is a 400, so every required key is carried over unchanged and only
-// isNewPersonField takes the planned value. A key the GET did not return is left
-// out rather than invented — CT's own validation error then names it.
-func dbFieldPutBody(current client.Row, isNewPersonField bool) client.Row {
+// isNewPersonField and isActive take the planned values. A key the GET did not
+// return is left out rather than invented — CT's own validation error then names it.
+func dbFieldPutBody(current client.Row, isNewPersonField, isActive bool) client.Row {
 	body := client.Row{}
 	for _, k := range dbFieldPutKeys {
 		if v, ok := current[k]; ok {
@@ -145,6 +161,7 @@ func dbFieldPutBody(current client.Row, isNewPersonField bool) client.Row {
 		}
 	}
 	body["isNewPersonField"] = isNewPersonField
+	body["isActive"] = isActive
 	return body
 }
 
@@ -164,13 +181,27 @@ func (r *dbFieldResource) Update(ctx context.Context, req resource.UpdateRequest
 		resp.Diagnostics.AddError("Datenfeld konnte nicht gelesen werden", err.Error())
 		return
 	}
+	// Ask the CONFIG whether is_active is managed, not the plan: UseStateForUnknown
+	// copies the state value into the plan, so an omitted is_active looks set there,
+	// and with -refresh=false (or a UI change after refresh) that stale value would
+	// be written back. Omitted means: keep what the instance holds now.
+	var configured types.Bool
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("is_active"), &configured)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	isActive := boolField(current, "isActive")
+	if !configured.IsNull() && !configured.IsUnknown() {
+		isActive = configured.ValueBool()
+	}
 	if _, err := r.client.Update(ctx, dbFieldCollection, id, "PUT",
-		dbFieldPutBody(current, plan.IsNewPersonField.ValueBool())); err != nil {
+		dbFieldPutBody(current, plan.IsNewPersonField.ValueBool(), isActive)); err != nil {
 		resp.Diagnostics.AddError("Datenfeld konnte nicht aktualisiert werden", err.Error())
 		return
 	}
 	plan.ID = state.ID
 	plan.Key = types.StringValue(stringField(current, "key"))
+	plan.IsActive = types.BoolValue(isActive)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 

@@ -78,16 +78,20 @@ rather than through the provider that wrote it. A Bereich **create** has never b
 exercised (nothing needed one) and a **delete** never will be, since Delete only
 un-manages by design.
 
-`db_field` (`/dbfields/{id}`) is **import-only** and manages exactly one setting of
-a data field that already exists: `is_new_person_field` ("Beim Anlegen einer Person
-abfragen"); `key` is read-only. Create refuses and points at an `import` block. The
+`db_field` (`/dbfields/{id}`) is **import-only** and manages two settings of a data
+field that already exists: `is_new_person_field` ("Beim Anlegen einer Person
+abfragen") and the optional `is_active` ("Aktiv" — left out, the instance's value
+is kept); `key` is read-only. A built-in field can be inactive: eqrm-dev ships
+`isSystemUser` that way. Create refuses and points at an `import` block. The
 write contract was measured on eqrm-dev (CT 3.137.0-RC22) on 2026-09-29: there is no PATCH
 (405, "Must be one of: GET, PUT, DELETE"), and a partial PUT is a 400 because PUT
 replaces. Update therefore GETs the field and PUTs back the OpenAPI request keys
 (`id, name, shorty, length, lineEnding, securityLevel, sortKey, isActive,
 useAsPlaceholder, isNewPersonField, deleteOnArchive`) with only the flag changed. On
 dev that body was a verified no-op on three fields (GET before/after identical), and a
-real toggle of field 32 landed and was restored.
+real toggle of field 32 landed and was restored. `is_active` rides the same PUT;
+it is covered by the mock tests, and its first live write is ct-structure's dev
+apply for IT-29.
 
 ## Authentication
 
