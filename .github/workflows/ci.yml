@@ -32,9 +32,14 @@ jobs:
           go-version: stable
       - run: go build ./...
       - run: go vet ./...
-      # The provider package alone took 566s of the default 10m under -race on the
-      # runner (2026-10-02); the acceptance suite only grows.
-      - run: go test ./... -v -race -timeout 30m
+      # ubuntu-24.04 ships no terraform, and resource.Test then downloads the
+      # latest release into a fresh temp dir for EVERY test case (~10s each):
+      # the suite took 566s and hit go test's 10m default. Install it once.
+      # The wrapper must stay off: it mangles the stdout terraform-exec parses.
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - run: go test ./... -v -race
         env:
           TF_ACC: "1"
 
