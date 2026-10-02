@@ -95,7 +95,10 @@ built-ins: `isActive = false` on birthplace (18), job (19) and nationalityId (20
 answered 200 and changed nothing, and CT's own UI greys the checkbox out. Nothing in
 the GET marks the lock, so Update reads the field back after every PUT and fails with
 „ChurchTools hat die Änderung ignoriert“ instead of storing a value the instance
-doesn't hold. A successful `is_active` toggle has not run live yet.
+doesn't hold. The read-back ran live on eqrm-dev on 2026-10-02: `is_active = false`
+on job (19) failed with that error and left field and state at `true`, and an
+`is_new_person_field` toggle of field 32 passed it both ways and was restored. A
+successful `is_active` toggle has not run live yet.
 
 ## Authentication
 
