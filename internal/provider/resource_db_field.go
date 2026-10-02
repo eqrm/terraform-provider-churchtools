@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/eqrm/terraform-provider-churchtools/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -20,14 +21,18 @@ import (
 // IMPORT-ONLY, and it manages exactly TWO settings: isNewPersonField ("Beim
 // Anlegen einer Person abfragen") and isActive ("Aktiv"). The fields this exists
 // for are ChurchTools built-ins (statusId, id 32, is the reason for the first:
-// ct-structure hides it from the create-person dialog, IT-8; birthplace, job and
-// nationalityId for the second: IT-29 switches them off), so Create refuses
+// ct-structure hides it from the create-person dialog, IT-8), so Create refuses
 // rather than POSTing a custom field, and Delete orphans like every other
 // resource here.
 //
 // is_active is Optional+Computed: a config that leaves it out keeps whatever the
 // instance has, so the statusId import from before this attribute existed plans
-// no change. A built-in CAN be inactive — eqrm-dev ships isSystemUser that way.
+// no change. A built-in CAN be inactive — eqrm-dev ships isSystemUser that way —
+// but CT locks "Aktiv" on others: birthplace (18), job (19) and nationalityId (20)
+// answer a PUT with isActive = false with 200 and stay active, and CT's own UI
+// greys the checkbox out (eqrm-dev, 2026-10-02; that ended IT-29). The spec has
+// no flag for the lock, so Update reads the field back after the PUT and fails
+// when a managed setting didn't land.
 //
 // The write contract was measured on eqrm-dev (CT 3.137.0-RC22) on 2026-09-29, not
 // read off the spec alone:
@@ -197,6 +202,39 @@ func (r *dbFieldResource) Update(ctx context.Context, req resource.UpdateRequest
 	if _, err := r.client.Update(ctx, dbFieldCollection, id, "PUT",
 		dbFieldPutBody(current, plan.IsNewPersonField.ValueBool(), isActive)); err != nil {
 		resp.Diagnostics.AddError("Datenfeld konnte nicht aktualisiert werden", err.Error())
+		return
+	}
+	// A 200 is not proof the write landed: CT accepts isActive on a locked built-in
+	// (job, birthplace, nationalityId) and keeps the old value (eqrm-dev, 2026-10-02).
+	// Read it back and refuse to record a state the instance doesn't hold — that
+	// would plan the same change on every run.
+	after, err := r.client.Get(ctx, dbFieldCollection, id)
+	if err != nil {
+		resp.Diagnostics.AddError("Datenfeld konnte nach dem Speichern nicht gelesen werden", err.Error())
+		return
+	}
+	for _, f := range []struct {
+		key, attr string
+		want      bool
+		// hint is the way out; is_new_person_field is Required, so it can't be dropped.
+		hint string
+	}{
+		{"isNewPersonField", "is_new_person_field", plan.IsNewPersonField.ValueBool(),
+			"Setze is_new_person_field auf %t."},
+		{"isActive", "is_active", isActive,
+			"So sperrt ChurchTools „Aktiv“ bei Beruf, Geburtsort und Nationalität. " +
+				"Entferne is_active aus der Konfiguration oder setze ihn auf %t."},
+	} {
+		if got := boolField(after, f.key); got != f.want {
+			resp.Diagnostics.AddError(
+				"ChurchTools hat die Änderung ignoriert",
+				fmt.Sprintf("PUT %s/%s mit %s = %t wurde angenommen, das Feld steht danach aber "+
+					"weiter auf %t. ChurchTools sperrt manche Einstellungen bei eingebauten Feldern "+
+					"(in der Oberfläche ist die Checkbox ausgegraut). ",
+					dbFieldCollection, id, f.attr, f.want, got)+fmt.Sprintf(f.hint, got))
+		}
+	}
+	if resp.Diagnostics.HasError() {
 		return
 	}
 	plan.ID = state.ID

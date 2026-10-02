@@ -134,10 +134,13 @@ func TestAccDBField_UpdateSendsFullBodyChangingOnlyTheFlag(t *testing.T) {
 	}
 }
 
-// seedJobField installs data field 19 (job, "Beruf") as eqrm-dev returns it — the
-// shape IT-29 switches off. Trimmed to the keys Update reads plus one nested
-// read-only object, which must not reach the PUT.
-func seedJobField(mock *testmock.Server) {
+// seedJobField installs data field 19 (job, "Beruf") as eqrm-dev returns it,
+// trimmed to the keys Update reads plus one nested read-only object, which must
+// not reach the PUT. Live, job's "Aktiv" is LOCKED: CT answers a PUT with
+// isActive = false with 200 and keeps true (eqrm-dev, 2026-10-02). locked = true
+// reproduces that; locked = false lets the same shape stand in for a field whose
+// "Aktiv" CT does let you change.
+func seedJobField(mock *testmock.Server, locked bool) {
 	mock.Seed("/dbfields", 19, map[string]any{
 		"name":             "profession",
 		"shorty":           "profession",
@@ -152,6 +155,9 @@ func seedJobField(mock *testmock.Server) {
 		"sortKey":          float64(4),
 		"deleteOnArchive":  false,
 	})
+	if locked {
+		mock.IgnoreOnPut("/dbfields", 19, "isActive")
+	}
 }
 
 func jobFieldConfig(host, isActive string) string {
@@ -169,12 +175,12 @@ resource "churchtools_db_field" "job" {
 }`
 }
 
-// IT-29: importing a field with is_active = false switches it off in the same
-// apply, through the full PUT body, and leaves isNewPersonField alone.
+// Importing a field with is_active = false switches it off in the same apply,
+// through the full PUT body, and leaves isNewPersonField alone.
 func TestAccDBField_ImportDeactivates(t *testing.T) {
 	mock := testmock.New()
 	defer mock.Close()
-	seedJobField(mock)
+	seedJobField(mock, false)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: protoV6(),
@@ -211,12 +217,57 @@ func TestAccDBField_ImportDeactivates(t *testing.T) {
 	}
 }
 
+// IT-29: on a field whose "Aktiv" CT locks, the PUT answers 200 and changes
+// nothing. The apply must fail and say so, not record is_active = false, which
+// would plan the same change on every run.
+func TestAccDBField_LockedIsActiveFails(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedJobField(mock, true)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{
+				Config:      jobFieldConfig(mock.URL, "false"),
+				ExpectError: regexp.MustCompile(`(?s)ChurchTools hat die Änderung ignoriert.*Entferne\s+is_active`),
+			},
+			// The error's own advice: dropping is_active applies cleanly and stays clean.
+			{Config: jobFieldConfig(mock.URL, "")},
+			{Config: jobFieldConfig(mock.URL, ""), PlanOnly: true},
+		},
+	})
+
+	if row := mock.Find("/dbfields", "key", "job"); row == nil || row["isActive"] != true {
+		t.Fatalf("locked isActive changed on the mock: %v", row)
+	}
+}
+
+// The same read-back guards is_new_person_field. It is Required, so the error
+// must not advise removing it from the config.
+func TestAccDBField_IgnoredNewPersonFieldFails(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedStatusField(mock, false)
+	mock.IgnoreOnPut("/dbfields", 32, "isNewPersonField")
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{
+				Config:      dbFieldConfig(mock.URL, "true"),
+				ExpectError: regexp.MustCompile(`(?s)ChurchTools hat die Änderung ignoriert.*Setze\s+is_new_person_field\s+auf\s+false`),
+			},
+		},
+	})
+}
+
 // Dropping is_active from the config after managing it keeps the last value
 // (Optional+Computed): no plan, no PUT that would silently re-activate.
 func TestAccDBField_OmittedIsActiveKeepsState(t *testing.T) {
 	mock := testmock.New()
 	defer mock.Close()
-	seedJobField(mock)
+	seedJobField(mock, false)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: protoV6(),

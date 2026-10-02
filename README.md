@@ -89,9 +89,16 @@ replaces. Update therefore GETs the field and PUTs back the OpenAPI request keys
 (`id, name, shorty, length, lineEnding, securityLevel, sortKey, isActive,
 useAsPlaceholder, isNewPersonField, deleteOnArchive`) with only the flag changed. On
 dev that body was a verified no-op on three fields (GET before/after identical), and a
-real toggle of field 32 landed and was restored. `is_active` rides the same PUT;
-it is covered by the mock tests, and its first live write is ct-structure's dev
-apply for IT-29.
+real toggle of field 32 landed and was restored. `is_active` rides the same PUT.
+Its first live write, on eqrm-dev on 2026-10-02, showed that CT locks "Aktiv" on some
+built-ins: `isActive = false` on birthplace (18), job (19) and nationalityId (20)
+answered 200 and changed nothing, and CT's own UI greys the checkbox out. Nothing in
+the GET marks the lock, so Update reads the field back after every PUT and fails with
+„ChurchTools hat die Änderung ignoriert“ instead of storing a value the instance
+doesn't hold. The read-back ran live on eqrm-dev on 2026-10-02: `is_active = false`
+on job (19) failed with that error and left field and state at `true`, and an
+`is_new_person_field` toggle of field 32 passed it both ways and was restored. A
+successful `is_active` toggle has not run live yet.
 
 ## Authentication
 
