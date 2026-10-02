@@ -181,11 +181,18 @@ func (r *dbFieldResource) Update(ctx context.Context, req resource.UpdateRequest
 		resp.Diagnostics.AddError("Datenfeld konnte nicht gelesen werden", err.Error())
 		return
 	}
-	// Unknown only when the config leaves is_active out and there is no state yet
-	// (an import's first apply): keep the instance's value.
+	// Ask the CONFIG whether is_active is managed, not the plan: UseStateForUnknown
+	// copies the state value into the plan, so an omitted is_active looks set there,
+	// and with -refresh=false (or a UI change after refresh) that stale value would
+	// be written back. Omitted means: keep what the instance holds now.
+	var configured types.Bool
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("is_active"), &configured)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	isActive := boolField(current, "isActive")
-	if !plan.IsActive.IsUnknown() && !plan.IsActive.IsNull() {
-		isActive = plan.IsActive.ValueBool()
+	if !configured.IsNull() && !configured.IsUnknown() {
+		isActive = configured.ValueBool()
 	}
 	if _, err := r.client.Update(ctx, dbFieldCollection, id, "PUT",
 		dbFieldPutBody(current, plan.IsNewPersonField.ValueBool(), isActive)); err != nil {
