@@ -134,6 +134,9 @@ var tier0HCLTypes = map[string]string{
 	"department":     "churchtools_department",
 	"person-status":  "churchtools_person_status",
 	"comment-viewer": "churchtools_comment_viewer",
+	// ct-cli follow-up, not this repo: HCL_TYPE in src/export/hcl.ts must gain
+	// group -> churchtools_group, and HCL_ATTR the three camelCase ids below.
+	"group": "churchtools_group",
 }
 
 // tier0Attrs maps CT's camelCase state fields onto the provider's snake_case
@@ -145,6 +148,11 @@ var tier0Attrs = map[string]string{
 	"isSearchable":    "is_searchable",
 	"sortKey":         "sort_key",
 	"securityLevelId": "security_level_id",
+	// Groups. Same ct-cli follow-up as above: HCL_ATTR must map groupTypeId,
+	// groupStatusId and campusId to these names.
+	"groupTypeId":   "group_type_id",
+	"groupStatusId": "group_status_id",
+	"campusId":      "campus_id",
 }
 
 // hclLabel mirrors the exporter: a reference must be a valid identifier, and a

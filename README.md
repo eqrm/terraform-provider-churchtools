@@ -22,7 +22,9 @@ resource "churchtools_campus" "mainz" {
 Pre-release. Tier-0 master data only: campus, group type, department, person
 status, comment viewer, contact label, relationship type, privacy-policy
 agreement type, privacy-agreement "who", target group, age group and group
-category — plus `db_field`, which manages one setting of an existing data field.
+category — plus `db_field`, which manages one setting of an existing data field, and
+`group` (name, group type, status and campus of a group; hierarchy, dynamic groups,
+member fields and grants will be separate resources).
 
 Nothing is ever deleted in ChurchTools. Every resource's `Delete` **un-manages**
 the object instead: it drops it from state, leaves it untouched in ChurchTools,
@@ -99,6 +101,16 @@ doesn't hold. The read-back ran live on eqrm-dev on 2026-10-02: `is_active = fal
 on job (19) failed with that error and left field and state at `true`, and an
 `is_new_person_field` toggle of field 32 passed it both ways and was restored. A
 successful `is_active` toggle has not run live yet.
+
+`group` (`/groups/{id}`) reads the group's ids from `information` and writes them flat
+(`name`, `groupTypeId`, `groupStatusId`, `campusId`). Verified read-only on eqrm-dev on
+2026-10-16: the GET shape (`campusId` is always present, JSON null or an int) and the
+404 for an unknown id. **POST and PATCH have not run live yet.** Unverified: the PATCH
+response code (200 or 204), and whether `campusId: null` really clears a campus. Update
+therefore never trusts the reply: it reads the group back and fails with „ChurchTools hat
+die Änderung ignoriert“ if any of the four values differs from the plan, so a silent
+ignore is an error rather than drift. Delete only un-manages; CT's DELETE would 409 on
+references and destroy memberships.
 
 ## Authentication
 
