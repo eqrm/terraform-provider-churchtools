@@ -194,6 +194,10 @@ pull request:
 
 Until step 2 is done, releases build and sign correctly and are still unusable.
 
+## Documentation
+
+Architecture (arc42): [docs/architecture](docs/architecture/README.md)
+
 ## Licence
 
 [MPL-2.0](LICENSE) — the licence OpenTofu itself and every HashiCorp provider
