@@ -1,0 +1,390 @@
+{
+  "version": 1,
+  "host": "https://example.church.tools",
+  "resources": {
+    "gruppe_001": {
+      "type": "group",
+      "id": 5001,
+      "key": "gruppe_001",
+      "fields": {
+        "name": "Gruppe 001",
+        "groupTypeId": 11,
+        "groupStatusId": 2,
+        "campusId": 0
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_002": {
+      "type": "group",
+      "id": 5002,
+      "key": "gruppe_002",
+      "fields": {
+        "name": "Gruppe 002",
+        "groupTypeId": 12,
+        "groupStatusId": 1,
+        "campusId": 1
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_003": {
+      "type": "group",
+      "id": 5003,
+      "key": "gruppe_003",
+      "fields": {
+        "name": "Gruppe 003",
+        "groupTypeId": 10,
+        "groupStatusId": 2,
+        "campusId": 2
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_004": {
+      "type": "group",
+      "id": 5004,
+      "key": "gruppe_004",
+      "fields": {
+        "name": "Gruppe 004",
+        "groupTypeId": 11,
+        "groupStatusId": 1
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_005": {
+      "type": "group",
+      "id": 5005,
+      "key": "gruppe_005",
+      "fields": {
+        "name": "Gruppe 005",
+        "groupTypeId": 12,
+        "groupStatusId": 2,
+        "campusId": null
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_006": {
+      "type": "group",
+      "id": 5006,
+      "key": "gruppe_006",
+      "fields": {
+        "name": "Gruppe 006",
+        "groupTypeId": 10,
+        "groupStatusId": 1,
+        "campusId": 0
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_007": {
+      "type": "group",
+      "id": 5007,
+      "key": "gruppe_007",
+      "fields": {
+        "name": "Gruppe 007",
+        "groupTypeId": 11,
+        "groupStatusId": 2,
+        "campusId": 1
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_008": {
+      "type": "group",
+      "id": 5008,
+      "key": "gruppe_008",
+      "fields": {
+        "name": "Gruppe 008",
+        "groupTypeId": 12,
+        "groupStatusId": 1,
+        "campusId": 2
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_009": {
+      "type": "group",
+      "id": 5009,
+      "key": "gruppe_009",
+      "fields": {
+        "name": "Gruppe 009",
+        "groupTypeId": 10,
+        "groupStatusId": 2
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_010": {
+      "type": "group",
+      "id": 5010,
+      "key": "gruppe_010",
+      "fields": {
+        "name": "Gruppe 010",
+        "groupTypeId": 11,
+        "groupStatusId": 1,
+        "campusId": null
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_011": {
+      "type": "group",
+      "id": 5011,
+      "key": "gruppe_011",
+      "fields": {
+        "name": "Gruppe 011",
+        "groupTypeId": 12,
+        "groupStatusId": 2,
+        "campusId": 0
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_012": {
+      "type": "group",
+      "id": 5012,
+      "key": "gruppe_012",
+      "fields": {
+        "name": "Gruppe 012",
+        "groupTypeId": 10,
+        "groupStatusId": 1,
+        "campusId": 1
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_013": {
+      "type": "group",
+      "id": 5013,
+      "key": "gruppe_013",
+      "fields": {
+        "name": "Gruppe 013",
+        "groupTypeId": 11,
+        "groupStatusId": 2,
+        "campusId": 2
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_014": {
+      "type": "group",
+      "id": 5014,
+      "key": "gruppe_014",
+      "fields": {
+        "name": "Gruppe 014",
+        "groupTypeId": 12,
+        "groupStatusId": 1
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_015": {
+      "type": "group",
+      "id": 5015,
+      "key": "gruppe_015",
+      "fields": {
+        "name": "Gruppe 015",
+        "groupTypeId": 10,
+        "groupStatusId": 2,
+        "campusId": null
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_016": {
+      "type": "group",
+      "id": 5016,
+      "key": "gruppe_016",
+      "fields": {
+        "name": "Gruppe 016",
+        "groupTypeId": 11,
+        "groupStatusId": 1,
+        "campusId": 0
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_017": {
+      "type": "group",
+      "id": 5017,
+      "key": "gruppe_017",
+      "fields": {
+        "name": "Gruppe 017",
+        "groupTypeId": 12,
+        "groupStatusId": 2,
+        "campusId": 1
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_018": {
+      "type": "group",
+      "id": 5018,
+      "key": "gruppe_018",
+      "fields": {
+        "name": "Gruppe 018",
+        "groupTypeId": 10,
+        "groupStatusId": 1,
+        "campusId": 2
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_019": {
+      "type": "group",
+      "id": 5019,
+      "key": "gruppe_019",
+      "fields": {
+        "name": "Gruppe 019",
+        "groupTypeId": 11,
+        "groupStatusId": 2
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_020": {
+      "type": "group",
+      "id": 5020,
+      "key": "gruppe_020",
+      "fields": {
+        "name": "Gruppe 020",
+        "groupTypeId": 12,
+        "groupStatusId": 1,
+        "campusId": null
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_021": {
+      "type": "group",
+      "id": 5021,
+      "key": "gruppe_021",
+      "fields": {
+        "name": "Gruppe 021",
+        "groupTypeId": 10,
+        "groupStatusId": 2,
+        "campusId": 0
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_022": {
+      "type": "group",
+      "id": 5022,
+      "key": "gruppe_022",
+      "fields": {
+        "name": "Gruppe 022",
+        "groupTypeId": 11,
+        "groupStatusId": 1,
+        "campusId": 1
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_023": {
+      "type": "group",
+      "id": 5023,
+      "key": "gruppe_023",
+      "fields": {
+        "name": "Gruppe 023",
+        "groupTypeId": 12,
+        "groupStatusId": 2,
+        "campusId": 2
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_024": {
+      "type": "group",
+      "id": 5024,
+      "key": "gruppe_024",
+      "fields": {
+        "name": "Gruppe 024",
+        "groupTypeId": 10,
+        "groupStatusId": 1
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_025": {
+      "type": "group",
+      "id": 5025,
+      "key": "gruppe_025",
+      "fields": {
+        "name": "Gruppe 025",
+        "groupTypeId": 11,
+        "groupStatusId": 2,
+        "campusId": null
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_026": {
+      "type": "group",
+      "id": 5026,
+      "key": "gruppe_026",
+      "fields": {
+        "name": "Gruppe 026",
+        "groupTypeId": 12,
+        "groupStatusId": 1,
+        "campusId": 0
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_027": {
+      "type": "group",
+      "id": 5027,
+      "key": "gruppe_027",
+      "fields": {
+        "name": "Gruppe 027",
+        "groupTypeId": 10,
+        "groupStatusId": 2,
+        "campusId": 1
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_028": {
+      "type": "group",
+      "id": 5028,
+      "key": "gruppe_028",
+      "fields": {
+        "name": "Gruppe 028",
+        "groupTypeId": 11,
+        "groupStatusId": 1,
+        "campusId": 2
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_029": {
+      "type": "group",
+      "id": 5029,
+      "key": "gruppe_029",
+      "fields": {
+        "name": "Gruppe 029",
+        "groupTypeId": 12,
+        "groupStatusId": 2
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    },
+    "gruppe_030": {
+      "type": "group",
+      "id": 5030,
+      "key": "gruppe_030",
+      "fields": {
+        "name": "Gruppe 030",
+        "groupTypeId": 10,
+        "groupStatusId": 1,
+        "campusId": null
+      },
+      "adoptedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:00.000Z"
+    }
+  }
+}

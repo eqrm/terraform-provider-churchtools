@@ -3,6 +3,8 @@ package provider
 import (
 	"errors"
 	"testing"
+
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 // CT answering a create with no usable id is not recoverable: idString gives
@@ -59,6 +61,27 @@ func TestTruncatePadded(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := truncatePadded(tc.in, tc.max, tc.pad); got != tc.want {
 				t.Errorf("truncatePadded(%q, %d, %d) = %q, want %q", tc.in, tc.max, tc.pad, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNestedIDString(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		row  map[string]any
+		want types.String
+	}{
+		{"number", map[string]any{"information": map[string]any{"campusId": float64(12)}}, types.StringValue("12")},
+		{"zero is a value", map[string]any{"information": map[string]any{"campusId": float64(0)}}, types.StringValue("0")},
+		{"null", map[string]any{"information": map[string]any{"campusId": nil}}, types.StringNull()},
+		{"absent key", map[string]any{"information": map[string]any{}}, types.StringNull()},
+		{"absent parent", map[string]any{}, types.StringNull()},
+		{"parent of wrong type", map[string]any{"information": "x"}, types.StringNull()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := nestedIDString(tc.row, "information", "campusId"); !got.Equal(tc.want) {
+				t.Errorf("got %v, want %v", got, tc.want)
 			}
 		})
 	}
