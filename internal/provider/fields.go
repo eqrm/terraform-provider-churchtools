@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 // idString renders a JSON-decoded CT id as a string. CT ids arrive as float64
@@ -55,4 +57,16 @@ func requireID(row map[string]any) (string, error) {
 		return "", fmt.Errorf("%w (Feld \"id\" fehlt oder ist leer)", errNoID)
 	}
 	return id, nil
+}
+
+// nestedIDString reads row[parent][key], a JSON number inside a nested object,
+// as a decimal string. null, absent and a missing parent all give
+// types.StringNull(): CT serves a group's campusId as JSON null for "no campus",
+// and 0 is a real campus, so "unset" must never be confused with "0".
+func nestedIDString(row map[string]any, parent, key string) types.String {
+	obj, _ := row[parent].(map[string]any)
+	if s := idString(obj[key]); s != "" {
+		return types.StringValue(s)
+	}
+	return types.StringNull()
 }
