@@ -23,6 +23,10 @@ sequenceDiagram
     Note over R: an empty 204 body is no error
 ```
 
+`group` differs in the Update step: it PATCHes only the changed fields and
+then GETs the group back instead of trusting the reply, erroring on any field
+ChurchTools didn't take.
+
 An empty id is refused (`ErrNoID`) because `GET /campuses/` would address the
 whole collection. A 404 on a *collection* path is a plain error, never
 `ErrNotFound`: it means the endpoint doesn't exist.

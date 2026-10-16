@@ -19,4 +19,4 @@ only repeat the README, the section links to it instead.
 | 11 | [Risks and technical debt](11-risks-and-technical-debt.md) |
 | 12 | [Glossary](12-glossary.md) |
 
-Resources that are not in `main` yet are not documented here.
+Resources that are not in `main` yet are not documented here. Tier 1 so far covers the group itself (`churchtools_group`).

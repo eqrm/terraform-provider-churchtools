@@ -52,3 +52,4 @@ All types are prefixed `churchtools_`. The authoritative list is `Resources()` i
 | `department` | read `/departments` | Legacy master data, table `cdb_bereich` |
 | `privacy_agreement_type` | read via `getMasterData` | Legacy master data, table `cdb_privacy_policy_agreement_types` |
 | `privacy_agreement_who` | read via `getMasterData` | None: import-only, built-in rows, kept off the write allowlist |
+| `group` | `/groups` | REST, POST + PATCH of the changed fields only; reads its ids from `information`, writes them flat; Update reads the group back and fails if CT ignored a field |

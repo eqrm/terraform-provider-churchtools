@@ -31,6 +31,6 @@
 
 ## ADR-6: Separate resources for hierarchy and rulesets (planned)
 
-- **Status:** Direction from the consumer's design; not implemented in this repo.
+- **Status:** Accepted. `churchtools_group` (#22) carries only name, type, status and campus; the hierarchy (`churchtools_group_parent`) and ruleset (`churchtools_dynamic_group`) resources are not built yet.
 - **Decision:** Hierarchy relations and dynamic-group rulesets are to be separate resources rather than attributes of the group, and ruleset normalisation (label stripping, type coercion) is to be ported into the provider to avoid perpetual diffs.
 - **Open:** Details are decided when the group tiers are built; revisit this record then.
