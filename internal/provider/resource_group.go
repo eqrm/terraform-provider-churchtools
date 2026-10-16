@@ -146,8 +146,10 @@ func (r *groupResource) Create(ctx context.Context, req resource.CreateRequest, 
 
 	row, err := r.client.Create(ctx, groupCollection, body)
 	if err != nil {
-		// CT has no `force` here and a second group of the same name is a real
-		// possibility, so point at import for a group that already exists.
+		// CT 400s a POST whose name an existing group already has ("Duplicate
+		// found. Use force flag …", messageKey forbidden.duplicate.group, seen
+		// live in ct-cli#75). This resource never sends `force`, so a same-named
+		// group is almost always one to import, not to create.
 		resp.Diagnostics.AddError("Gruppe konnte nicht angelegt werden",
 			err.Error()+"\n\nExistiert die Gruppe bereits in ChurchTools, importiere sie statt sie "+
 				"neu anzulegen: `tofu import churchtools_group.<name> <id>`.")
