@@ -105,9 +105,11 @@ successful `is_active` toggle has not run live yet.
 `group` (`/groups/{id}`) reads the group's ids from `information` and writes them flat
 (`name`, `groupTypeId`, `groupStatusId`, `campusId`). Verified read-only on eqrm-dev on
 2026-10-16: the GET shape (`campusId` is always present, JSON null or an int) and the
-404 for an unknown id. **POST and PATCH have not run live yet.** Unverified: the PATCH
-response code (200 or 204), and whether `campusId: null` really clears a campus. Update
-therefore never trusts the reply: it reads the group back and fails with „ChurchTools hat
+404 for an unknown id. Verified live on eqrm-dev on 2026-10-16 with one disposable group,
+deleted afterwards: POST creates and returns the id, PATCH answers 200, `campusId: null`
+clears a campus, a rename and a campus change each plan a no-op afterwards, and import
+of the existing group plans a no-op. Update still doesn't trust the reply: it reads the
+group back and fails with „ChurchTools hat
 die Änderung ignoriert“ if any of the four values differs from the plan, so a silent
 ignore is an error rather than drift. Delete only un-manages; CT's DELETE would 409 on
 references and destroy memberships.

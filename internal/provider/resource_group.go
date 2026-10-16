@@ -36,9 +36,9 @@ const groupCollection = "/groups"
 //
 // Read shape, probed read-only on eqrm-dev on 2026-10-16: the row nests the three
 // ids under `information`, and campusId is always there, JSON null or an int.
-// Writes take them FLAT at the top level. POST/PATCH have not run live; the
-// response code of PATCH is unverified, so Update never trusts the reply body and
-// reads the group back instead.
+// Writes take them FLAT at the top level. POST and PATCH ran live on eqrm-dev
+// on 2026-10-16 (PATCH answers 200, campusId null clears); Update still never
+// trusts the reply body and reads the group back instead.
 type groupResource struct {
 	client *client.Client
 }
@@ -230,7 +230,7 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		return
 	}
 
-	// The PATCH response code is unverified live, so don't read the reply: read the
+	// Don't trust the PATCH reply (200 live, but its body is not the contract): read the
 	// group back. This also catches CT accepting a key and ignoring it (the same
 	// failure db_field hit on locked built-ins), which would otherwise be stored
 	// as state and re-planned on every run.
