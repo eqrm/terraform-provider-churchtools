@@ -1,8 +1,7 @@
-package provider
-
-// The grant engine behind churchtools_group_role: pure functions over CT's raw
-// permission rows, kept free of framework types so they can be tested against
-// captured payloads (testdata/group_role/) without Terraform in the loop.
+// Package grants is the grant engine behind every resource that owns a
+// permission domain (group_role, group_type_role, status): pure functions
+// over CT's raw permission rows, kept free of framework types so they can be tested against
+// captured payloads (testdata/) without Terraform in the loop.
 //
 // Vocabulary, because two of these words mean something else in ct-cli:
 //
@@ -15,6 +14,7 @@ package provider
 //   - dimension a right's scope field from CT's permission catalog
 //     (`cdb_gruppe`, `cdb_station`, `crp_query`, …). preserve_unknown is a set
 //     of dimensions.
+package grants
 
 import (
 	_ "embed"
@@ -37,32 +37,32 @@ import (
 //go:embed permission_catalog.json
 var permissionCatalogJSON []byte
 
-type catalogRight struct {
+type Right struct {
 	Name       string
 	AuthID     int64
 	ScopeField string // "" for a right without a data selection
 }
 
-type permissionCatalog struct {
-	byName     map[string]catalogRight
-	byID       map[int64]catalogRight
-	dimensions map[string]bool
-	version    string
+type PermissionCatalog struct {
+	ByName     map[string]Right
+	ByID       map[int64]Right
+	Dimensions map[string]bool
+	Version    string
 }
 
-func loadPermissionCatalog(raw []byte) (*permissionCatalog, error) {
+func LoadCatalog(raw []byte) (*PermissionCatalog, error) {
 	var entries map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &entries); err != nil {
 		return nil, err
 	}
-	c := &permissionCatalog{byName: map[string]catalogRight{}, byID: map[int64]catalogRight{}, dimensions: map[string]bool{}}
+	c := &PermissionCatalog{ByName: map[string]Right{}, ByID: map[int64]Right{}, Dimensions: map[string]bool{}}
 	for name, msg := range entries {
 		if name == "$meta" {
 			var meta struct {
 				CtVersion string `json:"ctVersion"`
 			}
 			_ = json.Unmarshal(msg, &meta)
-			c.version = meta.CtVersion
+			c.Version = meta.CtVersion
 			continue
 		}
 		var e struct {
@@ -72,22 +72,22 @@ func loadPermissionCatalog(raw []byte) (*permissionCatalog, error) {
 		if err := json.Unmarshal(msg, &e); err != nil {
 			return nil, fmt.Errorf("catalog entry %q: %w", name, err)
 		}
-		r := catalogRight{Name: name, AuthID: e.AuthID}
+		r := Right{Name: name, AuthID: e.AuthID}
 		if e.ScopeField != nil {
 			r.ScopeField = *e.ScopeField
-			c.dimensions[r.ScopeField] = true
+			c.Dimensions[r.ScopeField] = true
 		}
-		if prev, dup := c.byID[r.AuthID]; dup {
+		if prev, dup := c.ByID[r.AuthID]; dup {
 			return nil, fmt.Errorf("catalog: authId %d is both %q and %q", r.AuthID, prev.Name, name)
 		}
-		c.byName[name] = r
-		c.byID[r.AuthID] = r
+		c.ByName[name] = r
+		c.ByID[r.AuthID] = r
 	}
 	return c, nil
 }
 
-var rightsCatalog = func() *permissionCatalog {
-	c, err := loadPermissionCatalog(permissionCatalogJSON)
+var Catalog = func() *PermissionCatalog {
+	c, err := LoadCatalog(permissionCatalogJSON)
 	if err != nil {
 		panic("embedded permission catalog: " + err.Error())
 	}
@@ -106,41 +106,41 @@ var scopeAttrByDimension = map[string]string{
 	"cdb_comment_viewer": "comment_viewers",
 }
 
-const rawDataIDsAttr = "data_ids"
+const RawDataIDsAttr = "data_ids"
 
-// scopeAttrs is every scope argument, in schema order.
-var scopeAttrs = []string{"groups", "campuses", "departments", "security_levels", "group_types", "comment_viewers", rawDataIDsAttr}
+// ScopeAttrs is every scope argument, in schema order.
+var ScopeAttrs = []string{"groups", "campuses", "departments", "security_levels", "group_types", "comment_viewers", RawDataIDsAttr}
 
-// scopeAttrFor names the argument a right's ids belong in, "" for an unscoped right.
-func scopeAttrFor(r catalogRight) string {
+// ScopeAttrFor names the argument a right's ids belong in, "" for an unscoped right.
+func ScopeAttrFor(r Right) string {
 	if r.ScopeField == "" {
 		return ""
 	}
 	if a, ok := scopeAttrByDimension[r.ScopeField]; ok {
 		return a
 	}
-	return rawDataIDsAttr
+	return RawDataIDsAttr
 }
 
-// grantRow is a row's identity, comparable so it can key a map.
-type grantRow struct {
+// Row is a row's identity, comparable so it can key a map.
+type Row struct {
 	AuthID    int64
 	HasData   bool
 	DataID    int64
 	Subgroups bool
 }
 
-func rowOf(r client.PermissionRow) grantRow {
-	g := grantRow{AuthID: r.AuthID, Subgroups: r.IsInherited}
+func RowOf(r client.PermissionRow) Row {
+	g := Row{AuthID: r.AuthID, Subgroups: r.IsInherited}
 	if r.DataID != nil {
 		g.HasData, g.DataID = true, *r.DataID
 	}
 	return g
 }
 
-func (g grantRow) String() string {
+func (g Row) String() string {
 	name := strconv.FormatInt(g.AuthID, 10)
-	if r, ok := rightsCatalog.byID[g.AuthID]; ok {
+	if r, ok := Catalog.ByID[g.AuthID]; ok {
 		name = r.Name
 	}
 	s := name
@@ -153,49 +153,49 @@ func (g grantRow) String() string {
 	return s
 }
 
-// grantSpec is one `grant {}` block as plain values.
-type grantSpec struct {
+// Spec is one `grant {}` block as plain values.
+type Spec struct {
 	Right     string
 	Subgroups bool
 	IDs       []int64 // empty: the null row
 }
 
-// specKey is what makes two blocks the same block. Read can only produce one
+// Key is what makes two blocks the same block. Read can only produce one
 // block per key, so config must not split a key across two blocks either.
-func (s grantSpec) specKey() string {
+func (s Spec) Key() string {
 	return fmt.Sprintf("%s|%t|%t", s.Right, s.Subgroups, len(s.IDs) > 0)
 }
 
-func expandSpecs(specs []grantSpec) ([]grantRow, error) {
-	var out []grantRow
+func ExpandSpecs(specs []Spec) ([]Row, error) {
+	var out []Row
 	for _, s := range specs {
-		r, ok := rightsCatalog.byName[s.Right]
+		r, ok := Catalog.ByName[s.Right]
 		if !ok {
 			return nil, fmt.Errorf("unbekanntes Recht %q", s.Right)
 		}
 		if len(s.IDs) == 0 {
-			out = append(out, grantRow{AuthID: r.AuthID, Subgroups: s.Subgroups})
+			out = append(out, Row{AuthID: r.AuthID, Subgroups: s.Subgroups})
 			continue
 		}
 		for _, id := range s.IDs {
-			out = append(out, grantRow{AuthID: r.AuthID, HasData: true, DataID: id, Subgroups: s.Subgroups})
+			out = append(out, Row{AuthID: r.AuthID, HasData: true, DataID: id, Subgroups: s.Subgroups})
 		}
 	}
 	return out, nil
 }
 
-// collapseRows is expandSpecs' inverse, in a canonical order: one block per
+// CollapseRows is ExpandSpecs' inverse, in a canonical order: one block per
 // (right, subgroups, has-ids), ids sorted. Rows whose authId the catalog cannot
-// name never reach here (filterLiveRows drops them).
-func collapseRows(rows []grantRow) []grantSpec {
-	byKey := map[string]*grantSpec{}
+// name never reach here (FilterLive drops them).
+func CollapseRows(rows []Row) []Spec {
+	byKey := map[string]*Spec{}
 	for _, g := range rows {
-		r := rightsCatalog.byID[g.AuthID]
-		s := grantSpec{Right: r.Name, Subgroups: g.Subgroups}
+		r := Catalog.ByID[g.AuthID]
+		s := Spec{Right: r.Name, Subgroups: g.Subgroups}
 		if g.HasData {
 			s.IDs = []int64{g.DataID}
 		}
-		k := s.specKey()
+		k := s.Key()
 		if cur, ok := byKey[k]; ok {
 			cur.IDs = append(cur.IDs, s.IDs...)
 			continue
@@ -203,13 +203,13 @@ func collapseRows(rows []grantRow) []grantSpec {
 		cp := s
 		byKey[k] = &cp
 	}
-	out := make([]grantSpec, 0, len(byKey))
+	out := make([]Spec, 0, len(byKey))
 	for _, s := range byKey {
 		sort.Slice(s.IDs, func(i, j int) bool { return s.IDs[i] < s.IDs[j] })
 		s.IDs = dedupeIDs(s.IDs)
 		out = append(out, *s)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].specKey() < out[j].specKey() })
+	sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
 	return out
 }
 
@@ -223,14 +223,14 @@ func dedupeIDs(ids []int64) []int64 {
 	return out
 }
 
-// readResult is what Read keeps, and what it deliberately leaves out.
-type readResult struct {
-	Managed   []grantRow // goes into state as grant blocks
-	Preserved []grantRow // undeclared rows on a preserve_unknown dimension
-	Unknown   []grantRow // authIds the catalog cannot name: left alone, warned about
+// ReadResult is what Read keeps, and what it deliberately leaves out.
+type ReadResult struct {
+	Managed   []Row // goes into state as grant blocks
+	Preserved []Row // undeclared rows on a preserve_unknown dimension
+	Unknown   []Row // authIds the catalog cannot name: left alone, warned about
 }
 
-// filterLiveRows decides which live rows the resource's state shows.
+// FilterLive decides which live rows the resource's state shows.
 //
 // `declared` is the set of rows the previous state held (nil on import). It is
 // what tells "a preserved-dimension row I own" from "one somebody added by
@@ -247,19 +247,19 @@ type readResult struct {
 //
 // Everything else is in state, so an undeclared row on any other dimension —
 // or an undeclared unscoped right — shows up in the plan as a removal.
-func filterLiveRows(live []client.PermissionRow, declared map[grantRow]bool, preserve map[string]bool) readResult {
-	var res readResult
-	seen := map[grantRow]bool{}
+func FilterLive(live []client.PermissionRow, declared map[Row]bool, preserve map[string]bool) ReadResult {
+	var res ReadResult
+	seen := map[Row]bool{}
 	for _, lr := range live {
 		if lr.Type != "grant" {
 			continue
 		}
-		g := rowOf(lr)
+		g := RowOf(lr)
 		if seen[g] {
 			continue
 		}
 		seen[g] = true
-		r, known := rightsCatalog.byID[g.AuthID]
+		r, known := Catalog.ByID[g.AuthID]
 		switch {
 		case !known:
 			res.Unknown = append(res.Unknown, g)
@@ -276,9 +276,9 @@ func filterLiveRows(live []client.PermissionRow, declared map[grantRow]bool, pre
 	return res
 }
 
-// grantWrites is the request list one apply sends, in order: deletes first,
+// Writes is the request list one apply sends, in order: deletes first,
 // so a re-scoped grant never briefly holds both selections.
-type grantWrites struct {
+type Writes struct {
 	Deletes []client.PermissionWrite
 	Puts    []client.PermissionWrite
 }
@@ -288,7 +288,7 @@ type writeKey struct {
 	Subgroups bool
 }
 
-// planGrantWrites turns (previous state, desired, live) into requests.
+// PlanWrites turns (previous state, desired, live) into requests.
 //
 // The rule that makes preserve_unknown safe: a DELETE is only ever sent for a
 // row that was in the previous state — i.e. a row the plan showed — and is
@@ -298,12 +298,12 @@ type writeKey struct {
 //
 // PUTs go out for every desired row that is not live yet, which also repairs a
 // row deleted in the UI when the run skipped refresh.
-func planGrantWrites(prior, desired []grantRow, live []client.PermissionRow) (grantWrites, error) {
-	liveGrant := map[grantRow]client.PermissionRow{}
-	liveDeny := map[grantRow]bool{}
-	liveData := map[writeKey][]grantRow{} // every live row with a dataId, any type
+func PlanWrites(prior, desired []Row, live []client.PermissionRow) (Writes, error) {
+	liveGrant := map[Row]client.PermissionRow{}
+	liveDeny := map[Row]bool{}
+	liveData := map[writeKey][]Row{} // every live row with a dataId, any type
 	for _, lr := range live {
-		g := rowOf(lr)
+		g := RowOf(lr)
 		if lr.Type == "grant" {
 			liveGrant[g] = lr
 		} else {
@@ -314,17 +314,17 @@ func planGrantWrites(prior, desired []grantRow, live []client.PermissionRow) (gr
 			liveData[k] = append(liveData[k], g)
 		}
 	}
-	want := map[grantRow]bool{}
+	want := map[Row]bool{}
 	for _, d := range desired {
 		want[d] = true
 	}
 
-	var w grantWrites
+	var w Writes
 
 	// Deletes.
 	delIDs := map[writeKey][]int64{}
 	var delNull []writeKey
-	var nullRows []grantRow
+	var nullRows []Row
 	for _, p := range prior {
 		if want[p] {
 			continue
@@ -345,7 +345,7 @@ func planGrantWrites(prior, desired []grantRow, live []client.PermissionRow) (gr
 	// deletes (sent first) have run.
 	for _, p := range nullRows {
 		k := writeKey{p.AuthID, p.Subgroups}
-		var others []grantRow
+		var others []Row
 		for _, o := range liveData[k] {
 			if !slices.Contains(delIDs[k], o.DataID) {
 				others = append(others, o)
@@ -392,16 +392,16 @@ func planGrantWrites(prior, desired []grantRow, live []client.PermissionRow) (gr
 		// the key (OpenAPI, PUT /permissions/…). Say so instead of failing later
 		// on the read-back.
 		// A -1 this apply deletes first does not count.
-		all := grantRow{AuthID: k.AuthID, HasData: true, DataID: -1, Subgroups: k.Subgroups}
+		all := Row{AuthID: k.AuthID, HasData: true, DataID: -1, Subgroups: k.Subgroups}
 		if _, allLive := liveGrant[all]; allLive && !slices.Contains(delIDs[k], -1) {
 			if want[all] {
 				return w, fmt.Errorf("%s: die Auswahl -1 (alle) und einzelne Auswahlen schließen sich aus, "+
 					"ChurchTools ignoriert neben -1 jede weitere. Deklariere nur eines von beiden",
-					grantRow{AuthID: k.AuthID, Subgroups: k.Subgroups})
+					Row{AuthID: k.AuthID, Subgroups: k.Subgroups})
 			}
 			return w, fmt.Errorf("%s hat in ChurchTools bereits die Auswahl -1 (alle); ChurchTools "+
 				"ignoriert dann jede weitere Auswahl. Nimm -1 in die Konfiguration auf oder entferne es zuerst",
-				grantRow{AuthID: k.AuthID, Subgroups: k.Subgroups})
+				Row{AuthID: k.AuthID, Subgroups: k.Subgroups})
 		}
 		ids := putIDs[k]
 		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
@@ -414,16 +414,16 @@ func planGrantWrites(prior, desired []grantRow, live []client.PermissionRow) (gr
 	return w, nil
 }
 
-// verifyGrantWrites is the read-back after an apply. CT answers 204 to a PUT
+// VerifyWrites is the read-back after an apply. CT answers 204 to a PUT
 // it did not store — a right of a module the host lacks (dev's 701/702/2080),
 // or a selection next to an existing -1 — so a 2xx proves nothing.
-func verifyGrantWrites(desired, removed []grantRow, live []client.PermissionRow) error {
-	liveGrant := map[grantRow]bool{}
-	baseline := map[grantRow]bool{}
+func VerifyWrites(desired, removed []Row, live []client.PermissionRow) error {
+	liveGrant := map[Row]bool{}
+	baseline := map[Row]bool{}
 	for _, lr := range live {
 		if lr.Type == "grant" {
-			liveGrant[rowOf(lr)] = true
-			baseline[rowOf(lr)] = lr.IsSystemBaseline()
+			liveGrant[RowOf(lr)] = true
+			baseline[RowOf(lr)] = lr.IsSystemBaseline()
 		}
 	}
 	var missing, stuck []string
@@ -433,7 +433,7 @@ func verifyGrantWrites(desired, removed []grantRow, live []client.PermissionRow)
 		}
 	}
 	for _, r := range removed {
-		// planGrantWrites leaves CT's baseline rows alone on purpose.
+		// PlanWrites leaves CT's baseline rows alone on purpose.
 		if liveGrant[r] && !baseline[r] {
 			stuck = append(stuck, r.String())
 		}
@@ -455,15 +455,15 @@ func verifyGrantWrites(desired, removed []grantRow, live []client.PermissionRow)
 	return fmt.Errorf("%s", b.String())
 }
 
-// absentRows are the rows of `want` that no live grant row carries.
-func absentRows(want []grantRow, live []client.PermissionRow) []grantRow {
-	have := map[grantRow]bool{}
+// AbsentRows are the rows of `want` that no live grant row carries.
+func AbsentRows(want []Row, live []client.PermissionRow) []Row {
+	have := map[Row]bool{}
 	for _, lr := range live {
 		if lr.Type == "grant" {
-			have[rowOf(lr)] = true
+			have[RowOf(lr)] = true
 		}
 	}
-	var out []grantRow
+	var out []Row
 	for _, w := range want {
 		if !have[w] {
 			out = append(out, w)
@@ -472,11 +472,11 @@ func absentRows(want []grantRow, live []client.PermissionRow) []grantRow {
 	return out
 }
 
-// splitUnoffered separates rows whose right the host does not offer (its own
+// SplitUnoffered separates rows whose right the host does not offer (its own
 // right table, client.OfferedAuthIDs) from the rest. The unoffered ones are
 // never written, never read back and never revoked: CT answers 204 to such a
 // PUT and stores nothing, so there is nothing to manage on that host.
-func splitUnoffered(rows []grantRow, offered map[int64]bool) (keep, skipped []grantRow) {
+func SplitUnoffered(rows []Row, offered map[int64]bool) (keep, skipped []Row) {
 	for _, r := range rows {
 		if offered[r.AuthID] {
 			keep = append(keep, r)
@@ -487,13 +487,13 @@ func splitUnoffered(rows []grantRow, offered map[int64]bool) (keep, skipped []gr
 	return keep, skipped
 }
 
-// removedRows is prior minus desired: what an apply meant to revoke.
-func removedRows(prior, desired []grantRow) []grantRow {
-	want := map[grantRow]bool{}
+// RemovedRows is prior minus desired: what an apply meant to revoke.
+func RemovedRows(prior, desired []Row) []Row {
+	want := map[Row]bool{}
 	for _, d := range desired {
 		want[d] = true
 	}
-	var out []grantRow
+	var out []Row
 	for _, p := range prior {
 		if !want[p] {
 			out = append(out, p)
@@ -502,8 +502,8 @@ func removedRows(prior, desired []grantRow) []grantRow {
 	return out
 }
 
-func rowSet(rows []grantRow) map[grantRow]bool {
-	m := make(map[grantRow]bool, len(rows))
+func RowSet(rows []Row) map[Row]bool {
+	m := make(map[Row]bool, len(rows))
 	for _, r := range rows {
 		m[r] = true
 	}
@@ -528,6 +528,34 @@ func sortWriteKeys(keys []writeKey) {
 	})
 }
 
-func sortRows(rows []grantRow) {
+func SortRows(rows []Row) {
 	sort.Slice(rows, func(i, j int) bool { return rows[i].String() < rows[j].String() })
+}
+
+func RowList(rows []Row) string {
+	s := make([]string, len(rows))
+	for i, r := range rows {
+		s[i] = r.String()
+	}
+	return strings.Join(s, ", ")
+}
+
+// AdoptNewlyPreserved takes out of `prior` the rows that are about to be
+// revoked only because they were in state before their dimension joined
+// preserve_unknown. Such a row reached state as an undeclared row (a pending
+// removal); adding its dimension to preserve_unknown is the operator saying
+// "leave those alone", so the apply must not revoke it on that very run.
+// Ambiguous case, resolved in the safe direction: a block removed in the same
+// change that adds its dimension is kept, not revoked.
+func AdoptNewlyPreserved(prior, desired []Row, before, after map[string]bool) (kept, adopted []Row) {
+	want := RowSet(desired)
+	for _, p := range prior {
+		dim := Catalog.ByID[p.AuthID].ScopeField
+		if !want[p] && dim != "" && after[dim] && !before[dim] {
+			adopted = append(adopted, p)
+			continue
+		}
+		kept = append(kept, p)
+	}
+	return kept, adopted
 }
