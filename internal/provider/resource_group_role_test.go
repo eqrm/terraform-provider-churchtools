@@ -303,7 +303,8 @@ func TestAccGroupRole_OfferedRightStaysStrict(t *testing.T) {
 	})
 }
 
-// If the host's right table cannot be read, a missing grant is an error, not a skip.
+// If the host's right table cannot be read, nothing is skipped: the grant takes
+// the strict path and its missing read-back is an error naming the reason.
 func TestAccGroupRole_UnofferedFailsClosed(t *testing.T) {
 	mock := testmock.New()
 	defer mock.Close()
@@ -314,12 +315,36 @@ func TestAccGroupRole_UnofferedFailsClosed(t *testing.T) {
 		ProtoV6ProviderFactories: protoV6(),
 		Steps: []resource.TestStep{{
 			Config:      providerBlock(mock.URL) + fmt.Sprintf(sllConfig, `grant { right = "churchreport:view" }`),
-			ExpectError: regexp.MustCompile(`kein Überspringen`),
+			ExpectError: regexp.MustCompile(`nicht gespeichert(.|\n)*nichts\s+übersprungen`),
 		}},
 	})
-	if w := mock.PermissionWrites(); len(w) != 0 {
-		t.Fatalf("wrote despite an unreadable right table: %q", w)
+	if w := mock.PermissionWrites(); strings.Join(w, "; ") != "PUT 701" {
+		t.Fatalf("writes %q, want only the strict PUT 701", w)
 	}
+}
+
+// An unreadable right table must not block grants the host stores: adding
+// one, or refreshing over one deleted in the UI (a token without churchauth
+// access, a failing session handshake).
+func TestAccGroupRole_StoredGrantsNeedNoRightTable(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedSLL(mock)
+	mock.FailAuthTable()
+	cfg := providerBlock(mock.URL) + fmt.Sprintf(sllConfig, queryGrant)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: cfg, Check: lastWrites(mock, "PUT 702 [3]")},
+			{
+				// Deleted in the UI: plain drift, the plan re-adds it.
+				PreConfig:          func() { mock.SeedPermissions(16829, mock.Permissions(16829)[:2]) },
+				Config:             cfg,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+		},
+	})
 }
 
 // A role with no grant blocks on a pairing with no rows plans clean.

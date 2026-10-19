@@ -129,7 +129,9 @@ DELETE removes only that row. **Not measured**: DELETE without `dataId` (the moc
 removes every selection row of the right), a selection PUT next to `-1` (the mock
 ignores it), and whether a DELETE also removes a `revoke` row of the same identity;
 these come from CT 3.137's OpenAPI text. The skip of rights the host does not offer
-(701/702/2080 on eqrm-dev) is mock-tested only; the live check is pending (see the PR). Payload fixtures were captured read-only from
+(701/702/2080 on eqrm-dev) is mock-tested; its right table (`getMasterData`) was
+probed read-only on eqrm-dev and eqrm (2026-10-19), but no apply has skipped a right
+live yet. Payload fixtures were captured read-only from
 eqrm-dev (`internal/provider/testdata/group_role/`). See
 [group_role](#group_role-and-preserve_unknown) for the semantics.
 
@@ -176,9 +178,10 @@ pairing. Example: [`examples/resources/churchtools_group_role`](examples/resourc
   A declared grant whose right is not in that table is never written, never read
   back and never revoked; it stays in state as declared, so the plan is clean, and
   every apply or refresh warns with role, right and host. The table is only asked for
-  when a declared grant is not stored, so the normal path costs no extra call. A
-  right the host *does* offer keeps the strict read-back failure above. If the table
-  cannot be read, the run fails (no skip).
+  when a declared grant is not live yet (once per run). A right the host *does*
+  offer keeps the strict read-back failure above. If the table cannot be read,
+  nothing is skipped: every grant takes the strict path, so grants the host stores
+  still apply, and one it does not store fails with the reason in the message.
 - `preserved_grants` is what the last refresh saw, written to state like any
   attribute: a plain `plan` refreshes in memory and stores nothing, so a grant
   added in the UI shows up there after the next `apply` (or `apply -refresh-only`).

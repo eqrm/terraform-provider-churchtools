@@ -443,9 +443,8 @@ func verifyGrantWrites(desired, removed []grantRow, live []client.PermissionRow)
 	}
 	var b strings.Builder
 	if len(missing) > 0 {
-		fmt.Fprintf(&b, "ChurchTools hat diese Rechte angenommen (204), aber nicht gespeichert: %s. "+
-			"Häufigste Ursache: das Modul des Rechts ist auf dieser Instanz nicht aktiv "+
-			"(auf eqrm-dev z. B. churchreport und jpmFlowManagerPreview).", strings.Join(missing, ", "))
+		fmt.Fprintf(&b, "ChurchTools hat diese Rechte angenommen (204), aber nicht gespeichert: %s.",
+			strings.Join(missing, ", "))
 	}
 	if len(stuck) > 0 {
 		if b.Len() > 0 {

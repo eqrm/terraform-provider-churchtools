@@ -445,22 +445,23 @@ func (r *groupRoleResource) resolvePairing(ctx context.Context, groupID, role, i
 
 // --- CRUD ---
 
-// offeredSplit divides `absent` rows (declared but not live) into the ones the
-// host's right table offers and the ones it does not. It asks the host, once
-// per provider instance, and only when something is absent, so the strict path
-// (everything is stored) costs no extra call. If the host cannot say, it
-// fails closed: an error, never a skip.
-func (r *groupRoleResource) offeredSplit(ctx context.Context, absent []grantRow) (offeredRows, skipped []grantRow, err error) {
+// unofferedRows returns the `absent` rows (declared but not live) whose right
+// the host's right table does not offer. It asks the host, once per provider
+// instance, and only when something is absent. If the host cannot say, it
+// fails closed by skipping nothing: the rows then take the strict path (PUT,
+// read-back), which works for every right the host stores, so an unreadable
+// table never blocks an ordinary grant. The error is returned for messages.
+func (r *groupRoleResource) unofferedRows(ctx context.Context, absent []grantRow) ([]grantRow, error) {
 	if len(absent) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 	offered, err := r.client.OfferedAuthIDs(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("ob %s die Rechte %s anbietet, ließ sich nicht klären (kein Überspringen, "+
-			"bitte erneut versuchen): %w", r.client.BaseURL(), rowList(absent), err)
+		return nil, fmt.Errorf("ob %s die Rechte %s anbietet, ließ sich nicht klären, daher wird nichts "+
+			"übersprungen: %w", r.client.BaseURL(), rowList(absent), err)
 	}
-	offeredRows, skipped = splitUnoffered(absent, offered)
-	return offeredRows, skipped, nil
+	_, skipped := splitUnoffered(absent, offered)
+	return skipped, nil
 }
 
 func (r *groupRoleResource) warnSkipped(diags *diag.Diagnostics, groupID, role string, skipped []grantRow) {
@@ -484,10 +485,7 @@ func (r *groupRoleResource) apply(ctx context.Context, id string, prior, desired
 	}
 	// Only a declared row that is not stored yet can be one the host lacks;
 	// every other row proves its right is offered.
-	_, skipped, err = r.offeredSplit(ctx, absentRows(desired, live))
-	if err != nil {
-		return nil, nil, err
-	}
+	skipped, tableErr := r.unofferedRows(ctx, absentRows(desired, live))
 	if len(skipped) > 0 {
 		skip := rowSet(skipped)
 		var keep []grantRow
@@ -518,6 +516,9 @@ func (r *groupRoleResource) apply(ctx context.Context, id string, prior, desired
 	}
 	// Rights the host offers keep the strict check: 204 without a stored row is an error.
 	if err := verifyGrantWrites(desired, removedRows(prior, desired), after); err != nil {
+		if tableErr != nil {
+			err = fmt.Errorf("%w %v", err, tableErr)
+		}
 		return nil, nil, err
 	}
 	return after, skipped, nil
@@ -607,10 +608,10 @@ func (r *groupRoleResource) Read(ctx context.Context, req resource.ReadRequest, 
 	// declared, or every plan would propose to add it again (and every apply
 	// would skip it again): that is the clean plan. Only the host's own right
 	// table can tell it from a row deleted in the UI, which stays drift.
-	_, skipped, err := r.offeredSplit(ctx, absentRows(prior, live))
+	skipped, err := r.unofferedRows(ctx, absentRows(prior, live))
 	if err != nil {
-		resp.Diagnostics.AddError("Rollenrechte konnten nicht gelesen werden", err.Error())
-		return
+		resp.Diagnostics.AddWarning("Rechte-Tabelle nicht lesbar", err.Error()+
+			" Fehlende Rechte erscheinen deshalb im Plan als hinzuzufügen.")
 	}
 	r.warnSkipped(&resp.Diagnostics, state.GroupID.ValueString(), role, skipped)
 	res.Managed = append(res.Managed, skipped...)

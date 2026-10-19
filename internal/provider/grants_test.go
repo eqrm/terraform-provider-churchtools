@@ -312,7 +312,7 @@ func TestPlanGrantWritesGuards(t *testing.T) {
 func TestVerifyGrantWrites(t *testing.T) {
 	desired := []grantRow{{AuthID: 701}, {AuthID: viewAlldata, HasData: true, DataID: 2}}
 	err := verifyGrantWrites(desired, nil, fixture(t, "16829_sll_koblenz_mitglied"))
-	if err == nil || !strings.Contains(err.Error(), "churchreport:view") || !strings.Contains(err.Error(), "nicht aktiv") {
+	if err == nil || !strings.Contains(err.Error(), "churchreport:view") || !strings.Contains(err.Error(), "nicht gespeichert") {
 		t.Fatalf("missing 701 not reported: %v", err)
 	}
 	err = verifyGrantWrites(nil, []grantRow{{AuthID: 124, HasData: true, DataID: 24}}, fixture(t, "16829_sll_koblenz_mitglied"))

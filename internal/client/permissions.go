@@ -76,8 +76,9 @@ func (c *Client) OfferedAuthIDs(ctx context.Context) (map[int64]bool, error) {
 	if c.offered != nil {
 		return c.offered, nil
 	}
-	// The fallback is per field, as in ct-cli: some instances answer with the
-	// payload at the top level of the envelope.
+	// Decoded strictly: an entry without a numeric id is an error, never a
+	// silently unoffered right. eqrm and eqrm-dev (probed 2026-10-19) list only
+	// objects with numeric ids.
 	var payload struct {
 		AuthTable map[string]map[string]struct {
 			ID json.Number `json:"id"`
