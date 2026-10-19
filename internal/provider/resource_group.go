@@ -254,6 +254,12 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	if len(body) > 0 {
 		if _, err := r.client.Update(ctx, groupCollection, id, "PATCH", body); err != nil {
 			resp.Diagnostics.AddError("Gruppe konnte nicht aktualisiert werden", err.Error())
+			if typeChanged {
+				// The migration already landed; record it so the next plan starts from the truth.
+				if after, gerr := r.client.Get(ctx, groupCollection, id); gerr == nil {
+					resp.Diagnostics.Append(resp.State.Set(ctx, groupFromRow(id, after))...)
+				}
+			}
 			return
 		}
 	}
@@ -320,9 +326,13 @@ func (r *groupResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanR
 		plan.GroupTypeID.Equal(state.GroupTypeID) {
 		return
 	}
-	if _, err := r.planTypeChange(ctx, state.ID.ValueString(), state.GroupTypeID, plan.GroupTypeID); err != nil {
+	mig, err := r.planTypeChange(ctx, state.ID.ValueString(), state.GroupTypeID, plan.GroupTypeID)
+	if err != nil {
 		resp.Diagnostics.AddAttributeError(path.Root("group_type_id"), "Gruppentyp kann nicht gewechselt werden", err.Error())
+		return
 	}
+	resp.Diagnostics.AddAttributeWarning(path.Root("group_type_id"), "Rollen-Mapping beim Gruppentyp-Wechsel",
+		"Beim Apply sendet der Provider dieses Mapping (alte Rolle -> neue Rolle):\n"+mig.describe())
 }
 
 func groupDisplay(v types.String) string {

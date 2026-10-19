@@ -338,3 +338,34 @@ func TestAccGroup_TypeMigrationRefusesOccupiedUnmappedRole(t *testing.T) {
 		},
 	})
 }
+
+// The only holders of Mitglied sit on member page 2 (the client pages at 100): a
+// first-page-only read would call the role empty and map its members away.
+func TestAccGroup_TypeMigrationCountsMembersOnLaterPages(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedTypeMigration(mock, map[int]map[string]any{
+		201: {"name": "Leiter", "type": "leader", "default": false},
+		202: {"name": "Teilnehmer", "type": "participant", "default": true},
+	})
+	roles := make([]int, 0, 150)
+	for i := 0; i < 100; i++ {
+		roles = append(roles, 101)
+	}
+	for i := 0; i < 50; i++ {
+		roles = append(roles, 102)
+	}
+	mock.SeedMembers(5001, roles...)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: groupTypeConfig(mock.URL, "Gruppe 010", "11")},
+			{
+				Config:      groupTypeConfig(mock.URL, "Gruppe 010", "12"),
+				PlanOnly:    true,
+				ExpectError: regexp.MustCompile(`(?s)"Mitglied" \(Rolle 102, 50 Mitglied`),
+			},
+		},
+	})
+}

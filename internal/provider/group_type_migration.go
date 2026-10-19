@@ -41,6 +41,7 @@ type typeRole struct {
 
 type roleMove struct {
 	from, to typeRole
+	reason   string // "name" | "empty-role"
 }
 
 // blockedRole is a role that holds members but has no same-named target.
@@ -99,12 +100,12 @@ func deriveRoleMapping(source, targets []typeRole, members map[int64]int) ([]rol
 	for _, s := range source {
 		// Two target roles with one name would make "the" same-named role a guess.
 		if hit := bySlug[roleSlug(s.name)]; len(hit) == 1 {
-			moves = append(moves, roleMove{s, hit[0]})
+			moves = append(moves, roleMove{s, hit[0], "name"})
 			continue
 		}
 		if members[s.id] == 0 {
 			if d, ok := defaultTargetRole(targets, s.kind); ok {
-				moves = append(moves, roleMove{s, d})
+				moves = append(moves, roleMove{s, d, "empty-role"})
 				continue
 			}
 		}
@@ -153,9 +154,12 @@ func planGroupTypeMigration(ctx context.Context, c *client.Client, groupID strin
 	}
 	members := map[int64]int{}
 	for _, m := range memberRows {
-		if id, ok := m["groupTypeRoleId"].(float64); ok {
-			members[int64(id)]++
+		id, ok := m["groupTypeRoleId"].(float64)
+		if !ok {
+			return groupTypeMigration{}, fmt.Errorf("Eine Mitgliedschaft der Gruppe %s hat keine numerische groupTypeRoleId (%v). "+
+				"Ohne sie lässt sich nicht sagen, welche Rolle Mitglieder halten; es wird nicht migriert.", groupID, m)
 		}
+		members[int64(id)]++
 	}
 	// A member holding a role the catalog does not list for the current type would
 	// fall outside the mapping unnoticed.
@@ -195,4 +199,13 @@ func planGroupTypeMigration(ctx context.Context, c *client.Client, groupID strin
 			groupID, fromType, toType, strings.Join(lines, "\n"), toType, strings.Join(names, ", "))
 	}
 	return groupTypeMigration{toTypeID: toType, moves: moves}, nil
+}
+
+// describe lists the mapping as `from -> to (reason: ...)` lines.
+func (m groupTypeMigration) describe() string {
+	var lines []string
+	for _, mv := range m.moves {
+		lines = append(lines, fmt.Sprintf("%q -> %q (reason: %s)", mv.from.name, mv.to.name, mv.reason))
+	}
+	return strings.Join(lines, "\n")
 }
