@@ -69,7 +69,15 @@ type Client struct {
 
 	// See LockMasterDataCreate.
 	masterDataCreateMu sync.Mutex
+
+	// See OfferedAuthIDs. Only a successful answer is cached, so a transient
+	// error is retried by the next caller instead of being remembered.
+	offeredMu sync.Mutex
+	offered   map[int64]bool
 }
+
+// BaseURL is the host this client talks to, for messages.
+func (c *Client) BaseURL() string { return c.baseURL }
 
 // LockMasterDataCreate serializes the snapshot -> saveMasterData -> diff
 // sequence a legacy Create uses to find its row, since saveMasterData returns

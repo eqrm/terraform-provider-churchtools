@@ -249,21 +249,77 @@ import {
 	})
 }
 
-// CT answers 204 to a grant of a module the host lacks and stores nothing
-// (eqrm-dev: churchreport 701/702, jpmFlowManagerPreview 2080). The read-back
-// turns that into an error instead of a state that lies.
-func TestAccGroupRole_InactiveModule(t *testing.T) {
+// The same declaration on a host that lacks the module: the grant is skipped
+// with a warning, never written, never read back, and the plan stays clean over
+// repeated runs. The strict neighbours are still applied.
+func TestAccGroupRole_UnofferedRightSkipped(t *testing.T) {
 	mock := testmock.New()
 	defer mock.Close()
 	seedSLL(mock)
-	mock.SetInactiveAuthIDs(701)
+	mock.SetInactiveAuthIDs(701, 702, 2080)
+	cfg := providerBlock(mock.URL) + fmt.Sprintf(sllConfig, `grant { right = "churchreport:view" }
+  grant { right = "jpmFlowManagerPreview:view" }`)
+	noUnofferedWrite := func(*terraform.State) error {
+		for _, w := range mock.PermissionWrites() {
+			if strings.HasPrefix(w, "PUT 701") || strings.HasPrefix(w, "PUT 2080") {
+				return fmt.Errorf("wrote an unoffered right: %q", w)
+			}
+		}
+		if mock.AuthTableCalls() == 0 {
+			return fmt.Errorf("the host's right table was never asked for")
+		}
+		return nil
+	}
+	clean := resource.TestStep{Config: cfg, PlanOnly: true}
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: cfg, Check: resource.ComposeAggregateTestCheckFunc(
+				noUnofferedWrite,
+				resource.TestCheckResourceAttr("churchtools_group_role.mitglied", "grant.#", "4"),
+			)},
+			clean, clean, clean, // plan stability over three runs
+			{Config: cfg, ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+				plancheck.ExpectEmptyPlan(),
+			}}},
+		},
+	})
+}
+
+// A right the host offers keeps the strict guard even when the host lacks
+// OTHER modules: 204 without a stored row is an error.
+func TestAccGroupRole_OfferedRightStaysStrict(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedSLL(mock)
+	mock.SetInactiveAuthIDs(2080)
+	mock.SetDroppedAuthIDs(701)
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: protoV6(),
 		Steps: []resource.TestStep{{
 			Config:      providerBlock(mock.URL) + fmt.Sprintf(sllConfig, `grant { right = "churchreport:view" }`),
-			ExpectError: regexp.MustCompile(`nicht aktiv`),
+			ExpectError: regexp.MustCompile(`nicht gespeichert`),
 		}},
 	})
+}
+
+// If the host's right table cannot be read, a missing grant is an error, not a skip.
+func TestAccGroupRole_UnofferedFailsClosed(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedSLL(mock)
+	mock.SetInactiveAuthIDs(701)
+	mock.FailAuthTable()
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{{
+			Config:      providerBlock(mock.URL) + fmt.Sprintf(sllConfig, `grant { right = "churchreport:view" }`),
+			ExpectError: regexp.MustCompile(`kein Überspringen`),
+		}},
+	})
+	if w := mock.PermissionWrites(); len(w) != 0 {
+		t.Fatalf("wrote despite an unreadable right table: %q", w)
+	}
 }
 
 // A role with no grant blocks on a pairing with no rows plans clean.

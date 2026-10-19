@@ -128,7 +128,8 @@ revoked by exact `dataId`. Measured there: a scoped PUT is additive and an exact
 DELETE removes only that row. **Not measured**: DELETE without `dataId` (the mock
 removes every selection row of the right), a selection PUT next to `-1` (the mock
 ignores it), and whether a DELETE also removes a `revoke` row of the same identity;
-these come from CT 3.137's OpenAPI text. Payload fixtures were captured read-only from
+these come from CT 3.137's OpenAPI text. The skip of rights the host does not offer
+(701/702/2080 on eqrm-dev) is mock-tested only; the live check is pending (see the PR). Payload fixtures were captured read-only from
 eqrm-dev (`internal/provider/testdata/group_role/`). See
 [group_role](#group_role-and-preserve_unknown) for the semantics.
 
@@ -162,10 +163,22 @@ pairing. Example: [`examples/resources/churchtools_group_role`](examples/resourc
   dimension to `preserve_unknown` keeps the rows on it that the same plan showed as
   removals; removing a dimension makes its undeclared rows appear as removals in
   the *next* plan, never in the same apply.
-- Every write is read back. CT answers 204 to a grant it does not store (a right
-  of a module the instance lacks, such as eqrm-dev's churchreport 701/702 and
-  jpmFlowManagerPreview 2080, or a selection next to an existing `-1`), and the
-  apply fails instead of writing a state that lies.
+- Every write is read back. CT answers 204 to a grant it does not store (for
+  instance a selection next to an existing `-1`), and the apply fails instead of
+  writing a state that lies.
+- **Rights the host does not offer are skipped, with a warning.** eqrm-dev lacks the
+  churchreport and Flow 2.0 preview modules, so for 701/702 and 2080 CT answers 204
+  and never returns the row. The HCL stays the same on every host; the provider asks
+  the host itself which rights it defines (`POST /index.php?q=churchauth/ajax`,
+  `func=getMasterData`, `data.auth_table`: the same right table ct-cli captures per
+  host, read once per provider run through the session or token you already
+  configured). The embedded catalog is shared by all hosts and cannot answer this.
+  A declared grant whose right is not in that table is never written, never read
+  back and never revoked; it stays in state as declared, so the plan is clean, and
+  every apply or refresh warns with role, right and host. The table is only asked for
+  when a declared grant is not stored, so the normal path costs no extra call. A
+  right the host *does* offer keeps the strict read-back failure above. If the table
+  cannot be read, the run fails (no skip).
 - `preserved_grants` is what the last refresh saw, written to state like any
   attribute: a plain `plan` refreshes in memory and stores nothing, so a grant
   added in the UI shows up there after the next `apply` (or `apply -refresh-only`).

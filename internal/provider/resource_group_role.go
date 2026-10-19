@@ -445,35 +445,82 @@ func (r *groupRoleResource) resolvePairing(ctx context.Context, groupID, role, i
 
 // --- CRUD ---
 
+// offeredSplit divides `absent` rows (declared but not live) into the ones the
+// host's right table offers and the ones it does not. It asks the host, once
+// per provider instance, and only when something is absent, so the strict path
+// (everything is stored) costs no extra call. If the host cannot say, it
+// fails closed: an error, never a skip.
+func (r *groupRoleResource) offeredSplit(ctx context.Context, absent []grantRow) (offeredRows, skipped []grantRow, err error) {
+	if len(absent) == 0 {
+		return nil, nil, nil
+	}
+	offered, err := r.client.OfferedAuthIDs(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ob %s die Rechte %s anbietet, ließ sich nicht klären (kein Überspringen, "+
+			"bitte erneut versuchen): %w", r.client.BaseURL(), rowList(absent), err)
+	}
+	offeredRows, skipped = splitUnoffered(absent, offered)
+	return offeredRows, skipped, nil
+}
+
+func (r *groupRoleResource) warnSkipped(diags *diag.Diagnostics, groupID, role string, skipped []grantRow) {
+	if len(skipped) == 0 {
+		return
+	}
+	sortRows(skipped)
+	diags.AddWarning("Rechte auf dieser Instanz nicht angeboten",
+		fmt.Sprintf("Rolle %q in Gruppe %s: %s bietet diese Rechte nicht an (das zugehörige Modul ist dort nicht "+
+			"aktiv): %s. Sie werden auf dieser Instanz weder gesetzt noch entzogen; der Plan bleibt sauber.",
+			role, groupID, r.client.BaseURL(), rowList(skipped)))
+}
+
 // apply writes `desired` onto the pairing, revoking only rows of `prior`, then
-// reads back and returns the live rows.
-func (r *groupRoleResource) apply(ctx context.Context, id string, prior, desired []grantRow) ([]client.PermissionRow, error) {
+// reads back and returns the live rows plus the declared rows it skipped
+// because the host does not offer their right.
+func (r *groupRoleResource) apply(ctx context.Context, id string, prior, desired []grantRow) (after []client.PermissionRow, skipped []grantRow, err error) {
 	live, err := r.client.PermissionRows(ctx, groupRoleDomain, id)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	// Only a declared row that is not stored yet can be one the host lacks;
+	// every other row proves its right is offered.
+	_, skipped, err = r.offeredSplit(ctx, absentRows(desired, live))
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(skipped) > 0 {
+		skip := rowSet(skipped)
+		var keep []grantRow
+		for _, d := range desired {
+			if !skip[d] {
+				keep = append(keep, d)
+			}
+		}
+		desired = keep
 	}
 	w, err := planGrantWrites(prior, desired, live)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, d := range w.Deletes {
 		if err := r.client.DeletePermission(ctx, groupRoleDomain, id, d); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	for _, p := range w.Puts {
 		if err := r.client.PutPermission(ctx, groupRoleDomain, id, p); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	after, err := r.client.PermissionRows(ctx, groupRoleDomain, id)
+	after, err = r.client.PermissionRows(ctx, groupRoleDomain, id)
 	if err != nil {
-		return nil, fmt.Errorf("Rechte nach dem Schreiben nicht lesbar: %w", err)
+		return nil, nil, fmt.Errorf("Rechte nach dem Schreiben nicht lesbar: %w", err)
 	}
+	// Rights the host offers keep the strict check: 204 without a stored row is an error.
 	if err := verifyGrantWrites(desired, removedRows(prior, desired), after); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return after, nil
+	return after, skipped, nil
 }
 
 func (r *groupRoleResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -499,11 +546,12 @@ func (r *groupRoleResource) Create(ctx context.Context, req resource.CreateReque
 	// Create never revokes: prior is empty. A live grant the config does not
 	// declare is kept by this apply and shows up as a removal in the NEXT plan,
 	// where an operator can see it — a create must not revoke silently.
-	after, err := r.apply(ctx, id, nil, desired)
+	after, skipped, err := r.apply(ctx, id, nil, desired)
 	if err != nil {
 		resp.Diagnostics.AddError(summary, err.Error())
 		return
 	}
+	r.warnSkipped(&resp.Diagnostics, plan.GroupID.ValueString(), plan.Role.ValueString(), skipped)
 	res := filterLiveRows(after, rowSet(desired), preserveDims(plan.PreserveUnknown))
 	if extra := removedRows(res.Managed, desired); len(extra) > 0 {
 		sortRows(extra)
@@ -555,6 +603,17 @@ func (r *groupRoleResource) Read(ctx context.Context, req resource.ReadRequest, 
 				"nicht kennt: %s. Sie werden weder verwaltet noch entzogen.",
 				role, state.GroupID.ValueString(), rightsCatalog.version, rowList(res.Unknown)))
 	}
+	// A declared row the host does not offer is never live. Keep it in state as
+	// declared, or every plan would propose to add it again (and every apply
+	// would skip it again): that is the clean plan. Only the host's own right
+	// table can tell it from a row deleted in the UI, which stays drift.
+	_, skipped, err := r.offeredSplit(ctx, absentRows(prior, live))
+	if err != nil {
+		resp.Diagnostics.AddError("Rollenrechte konnten nicht gelesen werden", err.Error())
+		return
+	}
+	r.warnSkipped(&resp.Diagnostics, state.GroupID.ValueString(), role, skipped)
+	res.Managed = append(res.Managed, skipped...)
 	grants, d := setFromRows(ctx, res.Managed)
 	resp.Diagnostics.Append(d...)
 	state.ID = types.StringValue(id)
@@ -587,11 +646,12 @@ func (r *groupRoleResource) Update(ctx context.Context, req resource.UpdateReque
 				"neu in preserve_unknown aufnimmt; sie bleiben bestehen und erscheinen unter preserved_grants: %s.",
 				rowList(adopted)))
 	}
-	after, err := r.apply(ctx, id, prior, desired)
+	after, skipped, err := r.apply(ctx, id, prior, desired)
 	if err != nil {
 		resp.Diagnostics.AddError("Rollenrechte konnten nicht geändert werden", err.Error())
 		return
 	}
+	r.warnSkipped(&resp.Diagnostics, plan.GroupID.ValueString(), plan.Role.ValueString(), skipped)
 	res := filterLiveRows(after, rowSet(desired), preserveDims(plan.PreserveUnknown))
 	plan.ID = types.StringValue(id)
 	// A known planned value came from preservedGrantsModifier and must be
