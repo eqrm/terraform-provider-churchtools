@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/eqrm/terraform-provider-churchtools/internal/testmock"
 )
@@ -201,5 +202,163 @@ func TestSessionMode_NeverLogsIn(t *testing.T) {
 	}
 	if got := ct.Logins(); got != 0 {
 		t.Errorf("logins = %d, want 0", got)
+	}
+}
+
+// A 502 on the login says nothing about the token: it must not be remembered
+// for the run, the next caller retries.
+func TestTokenMode_TransientHandshakeErrorIsNotCached(t *testing.T) {
+	ct := testmock.New()
+	defer ct.Close()
+	ct.StrictSessions()
+	ct.FailWhoami(1, http.StatusBadGateway)
+
+	c := New(ct.URL, "tok")
+	if _, err := c.List(context.Background(), "/campuses"); err == nil {
+		t.Fatal("first call: want the 502")
+	}
+	if _, err := c.List(context.Background(), "/campuses"); err != nil {
+		t.Fatalf("second call must retry the handshake: %v", err)
+	}
+	if got := ct.Logins(); got != 1 {
+		t.Errorf("logins = %d, want 1", got)
+	}
+}
+
+// A refused token is definitive and is remembered (no hammering).
+func TestTokenMode_RefusedTokenIsCached(t *testing.T) {
+	ct := testmock.New()
+	defer ct.Close()
+	ct.FailWhoami(1, http.StatusForbidden)
+
+	c := New(ct.URL, "tok")
+	for i := 0; i < 3; i++ {
+		if _, err := c.List(context.Background(), "/campuses"); err == nil {
+			t.Fatal("want an error")
+		}
+	}
+	if got := ct.Logins(); got != 0 {
+		t.Errorf("logins = %d, want 0 (the 403 is remembered, later calls do not retry)", got)
+	}
+}
+
+// A route that 401s for a reason other than expiry may cost at most
+// maxRenewals extra logins in total, however many requests hit it.
+func TestTokenMode_RenewalsAreCapped(t *testing.T) {
+	var mu sync.Mutex
+	whoamis := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/api/whoami":
+			whoamis++
+			http.SetCookie(w, &http.Cookie{Name: "sid", Value: fmt.Sprint("s", whoamis)})
+			w.Write([]byte(`{"data":{}}`))
+		case "/api/csrftoken":
+			w.Write([]byte(`{"data":"c"}`))
+		default:
+			w.WriteHeader(http.StatusUnauthorized)
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok")
+	var last error
+	for i := 0; i < 10; i++ {
+		_, last = c.List(context.Background(), "/campuses")
+	}
+	if !errors.Is(last, ErrSessionKeepsExpiring) {
+		t.Errorf("err = %v, want ErrSessionKeepsExpiring", last)
+	}
+	if whoamis != 1+maxRenewals {
+		t.Errorf("logins = %d, want %d", whoamis, 1+maxRenewals)
+	}
+}
+
+// Live CT answers a lapsed session on the legacy endpoint with 200 and
+// {"status":"error","message":"Session expired!"}.
+func TestTokenMode_AjaxSessionExpiredRenewsOnce(t *testing.T) {
+	ct := testmock.New()
+	defer ct.Close()
+	ct.StrictSessions()
+
+	c := New(ct.URL, "tok")
+	ctx := context.Background()
+	save := func() error {
+		return c.SaveMasterData(ctx, DepartmentTable,
+			map[string]any{"bezeichnung": "Bereich", "kuerzel": "B", "sortkey": 0}, nil)
+	}
+	if err := save(); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	ct.ExpireSessions()
+	if err := save(); err != nil {
+		t.Fatalf("save after expiry: %v", err)
+	}
+	if got := ct.Logins(); got != 2 {
+		t.Errorf("logins = %d, want 2", got)
+	}
+}
+
+// Cancelling while the login waits out a 429 returns promptly.
+func TestTokenMode_CancelDuringRateLimitWait(t *testing.T) {
+	ct := testmock.New()
+	defer ct.Close()
+	ct.RateLimitWhoami(1000, "30")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	c := New(ct.URL, "tok")
+	start := time.Now()
+	_, err := c.List(ctx, "/campuses")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want deadline exceeded", err)
+	}
+	if time.Since(start) > 3*time.Second {
+		t.Errorf("took %v, want prompt return", time.Since(start))
+	}
+
+	// A waiter queued behind a slow handshake honours its own ctx too.
+	go c.List(context.Background(), "/campuses")
+	time.Sleep(50 * time.Millisecond)
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel2()
+	start = time.Now()
+	if _, err := c.List(ctx2, "/campuses"); err == nil || time.Since(start) > 3*time.Second {
+		t.Errorf("waiter: err=%v after %v, want prompt ctx error", err, time.Since(start))
+	}
+}
+
+// csrftoken gets the same 429 patience as whoami.
+func TestTokenMode_CSRFTokenRateLimitIsRetried(t *testing.T) {
+	var mu sync.Mutex
+	csrfCalls, whoamis := 0, 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/api/whoami":
+			whoamis++
+			http.SetCookie(w, &http.Cookie{Name: "sid", Value: "s"})
+			w.Write([]byte(`{"data":{}}`))
+		case "/api/csrftoken":
+			csrfCalls++
+			if csrfCalls == 1 {
+				w.Header().Set("Retry-After", "0")
+				w.WriteHeader(http.StatusTooManyRequests)
+				return
+			}
+			w.Write([]byte(`{"data":"c"}`))
+		default:
+			w.Write([]byte(`{"data":[]}`))
+		}
+	}))
+	defer srv.Close()
+	if _, err := New(srv.URL, "tok").List(context.Background(), "/campuses"); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if whoamis != 1 || csrfCalls != 2 {
+		t.Errorf("whoami=%d csrftoken=%d, want 1 and 2", whoamis, csrfCalls)
 	}
 }

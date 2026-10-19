@@ -33,24 +33,58 @@ const (
 	handshakeAttempts = 4
 	handshakeMaxWait  = 30 * time.Second
 	handshakeBackoff  = time.Second
+	// transientLimit is how many consecutive handshakes may fail for a reason
+	// that says nothing about the token (5xx, network) before the failure is
+	// treated as the run's answer.
+	transientLimit = 3
+	// maxRenewals caps how many times one Client buys a replacement session.
+	// A route that keeps answering 401 for a reason other than expiry would
+	// otherwise cost one login per request, the very storm this client avoids.
+	maxRenewals = 3
 )
+
+// ErrSessionKeepsExpiring is returned once the renewal budget is spent.
+var ErrSessionKeepsExpiring = errors.New("churchtools: the session keeps expiring; not logging in again")
+
+// definitiveErr marks a handshake failure that retrying cannot fix (the token
+// is refused, logins are rate-limited past our patience). Only these are
+// remembered for the run; a 502 or a dropped connection is not.
+type definitiveErr struct{ error }
+
+func (e definitiveErr) Unwrap() error { return e.error }
+
+// lockSession takes the session lock, giving up if ctx ends first. It is a
+// channel rather than a sync.Mutex so a waiter behind a slow handshake (a 429
+// wait can take ~90s) still honours its own deadline.
+func (c *Client) lockSession(ctx context.Context) error {
+	select {
+	case c.sessionSem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *Client) unlockSession() { <-c.sessionSem }
 
 // session returns the cookie and CSRF token, performing the handshake once per
 // Client. One Client is shared by every resource and Terraform applies
 // resources concurrently, so the fields are both written and READ under the
-// mutex -- returning copies keeps callers off the shared state entirely. The
-// mutex is held across the handshake, so concurrent first callers wait for the
+// lock -- returning copies keeps callers off the shared state entirely. The
+// lock is held across the handshake, so concurrent first callers wait for the
 // one login instead of each making their own.
 func (c *Client) session(ctx context.Context) (cookie, csrf string, err error) {
 	// A session the operator supplied is already the answer, and buying another
 	// is not an option: this client holds no token to buy one with. Returned
-	// before the mutex because these fields are immutable after construction.
+	// before the lock because these fields are immutable after construction.
 	if c.usesSession() {
 		return c.fixedCookie, c.fixedCSRF, nil
 	}
 
-	c.sessionMu.Lock()
-	defer c.sessionMu.Unlock()
+	if err := c.lockSession(ctx); err != nil {
+		return "", "", err
+	}
+	defer c.unlockSession()
 	if c.handshakeErr != nil {
 		return "", "", c.handshakeErr
 	}
@@ -62,110 +96,123 @@ func (c *Client) session(ctx context.Context) (cookie, csrf string, err error) {
 
 // renewSession replaces a session ChurchTools rejected. `stale` is the cookie
 // the caller was refused with: if another goroutine has already renewed, the
-// fresh session is returned without a second login.
+// fresh session is returned without a second login. At most maxRenewals
+// replacements are bought per Client.
 func (c *Client) renewSession(ctx context.Context, stale string) (cookie, csrf string, err error) {
-	c.sessionMu.Lock()
-	defer c.sessionMu.Unlock()
+	if err := c.lockSession(ctx); err != nil {
+		return "", "", err
+	}
+	defer c.unlockSession()
 	if c.cookie != "" && c.csrfToken != "" && c.cookie != stale {
 		return c.cookie, c.csrfToken, nil
 	}
+	if c.renewals >= maxRenewals {
+		return "", "", fmt.Errorf("%w (%d renewals already used this run)", ErrSessionKeepsExpiring, c.renewals)
+	}
+	c.renewals++
 	c.cookie, c.csrfToken, c.handshakeErr = "", "", nil
 	return c.handshakeLocked(ctx)
 }
 
-// handshakeLocked buys a session. sessionMu must be held.
+// handshakeLocked buys a session. The session lock must be held.
 func (c *Client) handshakeLocked(ctx context.Context) (string, string, error) {
 	cookie, csrf, err := c.handshake(ctx)
 	if err != nil {
-		if ctx.Err() == nil {
+		var de definitiveErr
+		switch {
+		case ctx.Err() != nil:
+			// Our own cancellation says nothing about the host.
+		case errors.As(err, &de):
 			c.handshakeErr = err
+		default:
+			// Transient: the next caller retries, up to a bound.
+			c.transientFails++
+			if c.transientFails >= transientLimit {
+				c.handshakeErr = err
+			}
 		}
 		return "", "", err
 	}
+	c.transientFails = 0
 	c.cookie, c.csrfToken = cookie, csrf
 	return cookie, csrf, nil
 }
 
 func (c *Client) handshake(ctx context.Context) (string, string, error) {
-	cookie, err := c.whoami(ctx)
+	target := fmt.Sprintf("%s/api/whoami?login_token=%s", c.baseURL, url.QueryEscape(c.token))
+	resp, _, err := c.handshakeGet(ctx, target, "", "/whoami")
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("churchtools: session handshake (whoami): %w", err)
 	}
+	var jar []string
+	for _, ck := range resp.Cookies() {
+		jar = append(jar, ck.Name+"="+ck.Value)
+	}
+	if len(jar) == 0 {
+		return "", "", definitiveErr{fmt.Errorf("churchtools: session handshake (whoami) set no cookie — is the token valid?")}
+	}
+	cookie := strings.Join(jar, "; ")
 
 	// The CSRF read carries the cookie just obtained and nothing else: an
 	// Authorization header here would be a second login.
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/csrftoken", nil)
-	if err != nil {
-		return "", "", err
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Cookie", cookie)
-	resp, err := c.http.Do(req)
+	_, raw, err := c.handshakeGet(ctx, c.baseURL+"/api/csrftoken", cookie, "/csrftoken")
 	if err != nil {
 		return "", "", fmt.Errorf("churchtools: session handshake (csrftoken): %w", err)
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", "", err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return "", "", fmt.Errorf("churchtools: session handshake (csrftoken): %w",
-			&StatusError{Method: http.MethodGet, Path: "/csrftoken", Status: resp.StatusCode, Body: string(raw)})
-	}
 	var token string
 	if err := unwrap(raw, &token); err != nil {
-		return "", "", fmt.Errorf("churchtools: decoding csrftoken: %w", err)
+		return "", "", definitiveErr{fmt.Errorf("churchtools: decoding csrftoken: %w", err)}
 	}
 	if token == "" {
-		return "", "", fmt.Errorf("churchtools: session handshake returned an empty CSRF token")
+		return "", "", definitiveErr{fmt.Errorf("churchtools: session handshake returned an empty CSRF token")}
 	}
 	return cookie, token, nil
 }
 
-// whoami performs the login (the ONE login of a run) and returns the cookie.
-// It retries 429 within bounds, honouring Retry-After.
-func (c *Client) whoami(ctx context.Context) (string, error) {
-	target := fmt.Sprintf("%s/api/whoami?login_token=%s", c.baseURL, url.QueryEscape(c.token))
+// handshakeGet is one GET of the handshake with the 429 policy: Retry-After
+// honoured and capped, a few attempts, ctx-aware sleeps. `label` names the
+// route in errors; `target` may carry the token, so it is never printed.
+// Failures come back classified: 401/403, 4xx and an exhausted 429 are
+// definitive; 5xx and transport errors are not.
+func (c *Client) handshakeGet(ctx context.Context, target, cookie, label string) (*http.Response, []byte, error) {
 	for attempt := 1; ; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 		if err != nil {
-			return "", redactErr(err)
+			return nil, nil, redactErr(err)
 		}
 		req.Header.Set("Accept", "application/json")
+		if cookie != "" {
+			req.Header.Set("Cookie", cookie)
+		}
 		resp, err := c.http.Do(req)
 		if err != nil {
-			return "", fmt.Errorf("churchtools: session handshake (whoami): %w", redactErr(err))
+			return nil, nil, redactErr(err)
 		}
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		se := &StatusError{Method: http.MethodGet, Path: label, Status: resp.StatusCode, Body: string(body)}
 
-		if resp.StatusCode == http.StatusTooManyRequests {
+		switch {
+		case resp.StatusCode == http.StatusTooManyRequests:
 			if attempt >= handshakeAttempts {
-				return "", fmt.Errorf("churchtools: session handshake (whoami) was rate-limited "+
-					"(429) %d times in a row; ChurchTools is refusing logins, try again later: %w",
-					attempt, &StatusError{Method: http.MethodGet, Path: "/whoami", Status: resp.StatusCode, Body: string(body)})
+				return nil, nil, definitiveErr{fmt.Errorf("rate-limited (429) %d times in a row; "+
+					"ChurchTools is refusing logins, try again later: %w", attempt, se)}
 			}
-			wait := retryAfter(resp.Header.Get("Retry-After"), handshakeBackoff<<(attempt-1))
+			t := time.NewTimer(retryAfter(resp.Header.Get("Retry-After"), handshakeBackoff<<(attempt-1)))
 			select {
-			case <-time.After(wait):
+			case <-t.C:
 			case <-ctx.Done():
-				return "", ctx.Err()
+				t.Stop()
+				return nil, nil, ctx.Err()
 			}
 			continue
+		case resp.StatusCode >= 200 && resp.StatusCode <= 299:
+			return resp, body, nil
+		case resp.StatusCode >= 500:
+			return nil, nil, se
+		default:
+			return nil, nil, definitiveErr{se}
 		}
-		if resp.StatusCode < 200 || resp.StatusCode > 299 {
-			return "", fmt.Errorf("churchtools: session handshake (whoami): %w",
-				&StatusError{Method: http.MethodGet, Path: "/whoami", Status: resp.StatusCode, Body: string(body)})
-		}
-		var jar []string
-		for _, ck := range resp.Cookies() {
-			jar = append(jar, ck.Name+"="+ck.Value)
-		}
-		if len(jar) == 0 {
-			return "", fmt.Errorf("churchtools: session handshake (whoami) set no cookie — is the token valid?")
-		}
-		return strings.Join(jar, "; "), nil
 	}
 }
 
@@ -252,8 +299,10 @@ func (c *Client) AjaxJSON(ctx context.Context, module string, params map[string]
 	if err != nil {
 		return err
 	}
-	if status == http.StatusUnauthorized && !c.usesSession() {
-		// Same rule as REST: renew once, retry once.
+	if !c.usesSession() && ajaxExpired(status, raw) {
+		// Same rule as REST: renew once, retry once. A lapsed session is a 401
+		// on some routes but, on this endpoint, a 200 carrying
+		// {"status":"error","message":"Session expired!"} (seen on eqrm-dev).
 		cookie, csrf, err = c.renewSession(ctx, cookie)
 		if err != nil {
 			return err
@@ -305,4 +354,20 @@ func (c *Client) AjaxJSON(ctx context.Context, module string, params map[string]
 		return nil
 	}
 	return json.Unmarshal(env.Data, into)
+}
+
+// ajaxExpired reports whether a legacy-endpoint answer means the session
+// lapsed: a 401, or the 200 {"status":"error","message":"Session expired!"}.
+func ajaxExpired(status int, raw []byte) bool {
+	if status == http.StatusUnauthorized {
+		return true
+	}
+	var env struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}
+	if status < 200 || status > 299 || json.Unmarshal(raw, &env) != nil {
+		return false
+	}
+	return env.Status == "error" && strings.Contains(strings.ToLower(env.Message), "session expired")
 }

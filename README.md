@@ -55,6 +55,14 @@ outstanding. Build it locally in the meantime (_Local development_).
 
 ## What is verified, and what is not
 
+Token mode's single login and its renewal are verified against the mock only.
+Mid-run session expiry has never been exercised against a live instance, nor
+has REST with a cookie the provider bought itself (session mode has run live
+with a ct-cli cookie). The mock models expiry as 401 on REST and as `200
+{"status":"error","message":"Session expired!"}` on the legacy endpoint, which
+the provider renews once. ChurchTools answers a lapsed session on `/groups`
+with 403, not 401, so there is no renewal there and the read fails closed.
+
 Worth stating plainly, because "it has tests" and "its writes work" are different
 claims here.
 

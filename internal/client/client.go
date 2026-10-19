@@ -64,9 +64,13 @@ type Client struct {
 	// Terraform applies resources concurrently, so these fields are written
 	// from several goroutines and need the mutex. The mutex is held across the
 	// handshake, which is what makes it single-flight.
-	sessionMu sync.Mutex
-	cookie    string
-	csrfToken string
+	sessionSem chan struct{} // 1-slot lock, see lockSession
+	cookie     string
+	csrfToken  string
+	renewals   int
+	// transientFails counts consecutive handshakes that failed for reasons that
+	// say nothing about the token (5xx, network).
+	transientFails int
 	// handshakeErr remembers a failed handshake so the other ~340 resources do
 	// not each retry it against a host that is already refusing logins.
 	handshakeErr error
@@ -99,6 +103,8 @@ func New(baseURL, token string) *Client {
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   token,
 		http:    &http.Client{Timeout: 30 * time.Second},
+
+		sessionSem: make(chan struct{}, 1),
 	}
 }
 

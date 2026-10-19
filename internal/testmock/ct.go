@@ -59,6 +59,9 @@ type Server struct {
 	// header they carry.
 	whoami429  int
 	retryAfter string
+	// whoamiFail is how many /whoami calls still answer whoamiFailStatus.
+	whoamiFail       int
+	whoamiFailStatus int
 }
 
 // Logins is how many requests presented the login token so far.
@@ -66,6 +69,13 @@ func (s *Server) Logins() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.logins
+}
+
+// FailWhoami makes the next n /whoami calls answer the given status.
+func (s *Server) FailWhoami(n, status int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.whoamiFail, s.whoamiFailStatus = n, status
 }
 
 // Whoami429Left is how many 429 answers are still queued for /whoami.
@@ -391,8 +401,10 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.logins++
 	}
 	if r.URL.Path == "/api/whoami" {
-		if r.URL.Query().Get("login_token") != "" {
-			s.logins++
+		if s.whoamiFail > 0 {
+			s.whoamiFail--
+			w.WriteHeader(s.whoamiFailStatus)
+			return
 		}
 		if s.whoami429 > 0 {
 			s.whoami429--
@@ -403,9 +415,18 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			writeData(w, map[string]any{"message": "too many logins"})
 			return
 		}
+		if r.URL.Query().Get("login_token") != "" {
+			s.logins++ // only an accepted login is logged by CT
+		}
 	}
 	if s.strictSessions && r.URL.Path != "/api/whoami" && r.URL.Path != "/api/csrftoken" {
 		ck, err := r.Cookie("ChurchTools_ct")
+		if (err != nil || !s.sessions[ck.Value]) && r.URL.Path == legacyPath {
+			// Live CT answers the legacy endpoint 200 + this envelope, not 401.
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"status": "error", "message": "Session expired!"})
+			return
+		}
 		if err != nil || !s.sessions[ck.Value] {
 			w.WriteHeader(http.StatusUnauthorized)
 			writeData(w, map[string]any{"message": "no or expired session"})
