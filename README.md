@@ -120,12 +120,16 @@ ignore is an error rather than drift. Delete only un-manages; CT's DELETE would 
 references and destroy memberships.
 
 `group_role` (`/permissions/group_role/{pairingId}`, pairing resolved through
-`/groups/{id}/roles`) is a **spike and has not run against a live instance**. Its
-read path's payload shape was captured read-only from eqrm-dev on 2026-10-19 (three
-roles, in `internal/provider/testdata/group_role/`); the write semantics the mock
-models (additive PUT, DELETE without `dataId` removing every selection row of the
-right, a selection PUT ignored next to `-1`, a grant of an inactive module answered
-204 and never stored) come from CT 3.137's OpenAPI text, not from measurement. See
+`/groups/{id}/roles`) ran live on eqrm-dev on 2026-10-19 (sll_koblenz Mitglied,
+pairing 16829, [protocol and result in #26](https://github.com/eqrm/terraform-provider-churchtools/pull/26#issuecomment-6263338890)):
+create without writes, an undeclared grant on a preserved dimension stable over three
+plans, an undeclared unscoped right revoked alone, a declared selection row added and
+revoked by exact `dataId`. Measured there: a scoped PUT is additive and an exact-id
+DELETE removes only that row. **Not measured**: DELETE without `dataId` (the mock
+removes every selection row of the right), a selection PUT next to `-1` (the mock
+ignores it), and whether a DELETE also removes a `revoke` row of the same identity;
+these come from CT 3.137's OpenAPI text. Payload fixtures were captured read-only from
+eqrm-dev (`internal/provider/testdata/group_role/`). See
 [group_role](#group_role-and-preserve_unknown) for the semantics.
 
 ## group_role and preserve_unknown
@@ -162,6 +166,12 @@ pairing. Example: [`examples/resources/churchtools_group_role`](examples/resourc
   of a module the instance lacks, such as eqrm-dev's churchreport 701/702 and
   jpmFlowManagerPreview 2080, or a selection next to an existing `-1`), and the
   apply fails instead of writing a state that lies.
+- `preserved_grants` is what the last refresh saw, written to state like any
+  attribute: a plain `plan` refreshes in memory and stores nothing, so a grant
+  added in the UI shows up there after the next `apply` (or `apply -refresh-only`).
+  A plan that changes grants keeps it as it is, unless the change can move rows in
+  or out of it (a changed `preserve_unknown`, or a block declaring a preserved row);
+  only then is it "known after apply".
 - `terraform destroy` un-manages and revokes nothing. To revoke, remove the blocks
   and apply first.
 - Import id: `<group id>/<role name>`, or `<group id>/<role name>/<dim>,<dim>` to

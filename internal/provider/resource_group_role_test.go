@@ -8,7 +8,10 @@ import (
 
 	"github.com/eqrm/terraform-provider-churchtools/internal/testmock"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
+	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 // Mock acceptance tests for churchtools_group_role. They run under TF_ACC like
@@ -135,13 +138,33 @@ func TestAccGroupRole_PreserveUnknown(t *testing.T) {
 			},
 			{
 				// Undeclaring an owned row on the preserved dimension revokes that
-				// row, by exact id; the UI row next to it survives.
+				// row, by exact id; the UI row next to it survives. The plan keeps
+				// preserved_grants known: the change does not touch it.
 				Config: providerBlock(mock.URL) + fmt.Sprintf(sllConfig, ""),
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+					plancheck.ExpectKnownValue("churchtools_group_role.mitglied", tfjsonpath.New("preserved_grants"),
+						knownvalue.SetExact([]knownvalue.Check{knownvalue.StringExact("churchreport:view query [9]")})),
+				}},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					lastWrites(mock, "DELETE 702 [3]"),
 					liveHas(mock, 702, i64p(3), false),
 					liveHas(mock, 702, i64p(9), true),
 					resource.TestCheckResourceAttr("churchtools_group_role.mitglied", "grant.#", "2"),
+				),
+			},
+			{
+				// Declaring the preserved row takes it out of preserved_grants, so
+				// that plan leaves the attribute unknown.
+				Config: providerBlock(mock.URL) + fmt.Sprintf(sllConfig, `grant {
+    right    = "churchreport:view query"
+    data_ids = ["9"]
+  }`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+					plancheck.ExpectUnknownValue("churchtools_group_role.mitglied", tfjsonpath.New("preserved_grants")),
+				}},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("churchtools_group_role.mitglied", "preserved_grants.#", "0"),
+					resource.TestCheckResourceAttr("churchtools_group_role.mitglied", "grant.#", "3"),
 				),
 			},
 		},

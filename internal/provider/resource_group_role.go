@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"regexp"
 	"sort"
@@ -134,6 +135,7 @@ func (r *groupRoleResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Computed:    true,
 				Description: "The live grants preserve_unknown keeps out of this resource, for review: " +
 					"„I forgot one“ and „I deliberately left the module grants alone“ must never look alike.",
+				PlanModifiers: []planmodifier.Set{preservedGrantsModifier{}},
 			},
 		},
 		Blocks: map[string]schema.Block{
@@ -592,8 +594,62 @@ func (r *groupRoleResource) Update(ctx context.Context, req resource.UpdateReque
 	}
 	res := filterLiveRows(after, rowSet(desired), preserveDims(plan.PreserveUnknown))
 	plan.ID = types.StringValue(id)
-	plan.PreservedGrants = preservedSet(res.Preserved)
+	// A known planned value came from preservedGrantsModifier and must be
+	// returned as planned; it can only differ when the UI changed the role
+	// between plan and apply, and the next refresh picks that up.
+	if plan.PreservedGrants.IsUnknown() {
+		plan.PreservedGrants = preservedSet(res.Preserved)
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+}
+
+// preservedGrantsModifier keeps preserved_grants from state on an update that
+// cannot change it, so a plan with a grant diff does not also show it as
+// "known after apply". The set can change on an update only when
+// preserve_unknown changes or the config starts declaring a preserved row;
+// then it stays unknown.
+type preservedGrantsModifier struct{}
+
+func (preservedGrantsModifier) Description(context.Context) string {
+	return "Keeps preserved_grants from state unless preserve_unknown changes or a preserved row is declared."
+}
+
+func (m preservedGrantsModifier) MarkdownDescription(ctx context.Context) string {
+	return m.Description(ctx)
+}
+
+func (preservedGrantsModifier) PlanModifySet(ctx context.Context, req planmodifier.SetRequest, resp *planmodifier.SetResponse) {
+	if req.StateValue.IsNull() || !req.PlanValue.IsUnknown() || req.Plan.Raw.IsNull() {
+		return
+	}
+	var plan, state groupRoleModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() || plan.PreserveUnknown.IsUnknown() || plan.Grants.IsUnknown() {
+		return
+	}
+	if !maps.Equal(preserveDims(plan.PreserveUnknown), preserveDims(state.PreserveUnknown)) {
+		return
+	}
+	if tv, err := plan.Grants.ToTerraformValue(ctx); err != nil || !tv.IsFullyKnown() {
+		return
+	}
+	desired, d := rowsFromSet(ctx, plan.Grants)
+	if d.HasError() {
+		return // ValidateConfig reports it
+	}
+	preserved := map[string]bool{}
+	for _, e := range req.StateValue.Elements() {
+		if s, ok := e.(types.String); ok {
+			preserved[s.ValueString()] = true
+		}
+	}
+	for _, r := range desired {
+		if preserved[r.String()] {
+			return
+		}
+	}
+	resp.PlanValue = req.StateValue
 }
 
 // Delete un-manages without revoking, like every resource here and like
