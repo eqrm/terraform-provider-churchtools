@@ -1,0 +1,1132 @@
+{
+ "$meta": {
+  "capturedFrom": "eqrm.church.tools",
+  "ctVersion": "3.137.1",
+  "capturedAt": "2026-10-12",
+  "rightCount": 187,
+  "source": "POST /index.php?q=churchauth/ajax  func=getMasterData",
+  "regenerate": "ct permissions catalog --refresh (writes .ct/permission-catalog.eqrm.church.tools.json)"
+ },
+ "churchcore:administer settings": {
+  "authId": 1,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "System-Einstellungen verwalten"
+ },
+ "churchcore:edit public profiles": {
+  "authId": 10,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Öffentliche Profile verwalten"
+ },
+ "churchcore:view website": {
+  "authId": 11,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Übersicht sehen"
+ },
+ "churchcore:edit website staff": {
+  "authId": 12,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Benutzer verwalten"
+ },
+ "churchcore:edit website releases": {
+  "authId": 13,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Freigaben verwalten"
+ },
+ "churchcore:administer persons": {
+  "authId": 2,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Berechtigungen verwalten"
+ },
+ "churchcore:view logfile": {
+  "authId": 3,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Log einsehen"
+ },
+ "churchcore:edit languages": {
+  "authId": 9,
+  "scopeField": "cc_language",
+  "revocable": false,
+  "desc": "Übersetzungen verwalten"
+ },
+ "churchcore:edit translations masterdata": {
+  "authId": 5,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Sprachen verwalten"
+ },
+ "churchcore:simulate persons": {
+  "authId": 7,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Personen simulieren, Passwort ändern und Zugang sperren"
+ },
+ "churchcore:invite persons": {
+  "authId": 6,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Personen zu ChurchTools einladen"
+ },
+ "churchcore:administer church html templates": {
+  "authId": 16,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gemeinde-HTML-Vorlagen verwalten"
+ },
+ "churchcore:use church html templates": {
+  "authId": 17,
+  "scopeField": "cc_html_template",
+  "revocable": false,
+  "desc": "Gemeinde-HTML-Vorlagen verwenden"
+ },
+ "churchcore:view links": {
+  "authId": 19,
+  "scopeField": "cc_further_link",
+  "revocable": false,
+  "desc": "Einträge im Links-Widget sehen"
+ },
+ "churchcore:login to external system": {
+  "authId": 18,
+  "scopeField": "oauth_client",
+  "revocable": false,
+  "desc": "Bei Drittsystem via ChurchTools-Benutzerkonto einloggen"
+ },
+ "churchcore:administer custom modules": {
+  "authId": 15,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Erweiterungen verwalten"
+ },
+ "churchcheckin:view": {
+  "authId": 601,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "\"Check-in\" sehen"
+ },
+ "churchcheckin:create person": {
+  "authId": 602,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Personen erstellen"
+ },
+ "churchcheckin:edit masterdata": {
+  "authId": 699,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Drucker verwalten"
+ },
+ "churchdb:view": {
+  "authId": 101,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "\"Personen\" sehen"
+ },
+ "churchdb:view station": {
+  "authId": 124,
+  "scopeField": "cdb_station",
+  "revocable": false,
+  "desc": "Standort sehen"
+ },
+ "churchdb:view persons from campus": {
+  "authId": 133,
+  "scopeField": "cdb_station",
+  "revocable": false,
+  "desc": "Personen eines Standorts sehen"
+ },
+ "churchdb:view alldata": {
+  "authId": 102,
+  "scopeField": "cdb_bereich",
+  "revocable": false,
+  "desc": "Personen eines Bereiches sehen"
+ },
+ "churchdb:security level person": {
+  "authId": 125,
+  "scopeField": "cc_securitylevel",
+  "revocable": false,
+  "desc": "Personendaten sehen - bis zum gewählten Sicherheitslevel"
+ },
+ "churchdb:security level view own data": {
+  "authId": 131,
+  "scopeField": "cc_securitylevel",
+  "revocable": false,
+  "desc": "Eigene Personendaten sehen - bis zum gewählten Sicherheitslevel"
+ },
+ "churchdb:security level edit own data": {
+  "authId": 132,
+  "scopeField": "cc_securitylevel",
+  "revocable": false,
+  "desc": "Eigene Personendaten bearbeiten - bis zum gewählten Sicherheitslevel"
+ },
+ "churchdb:create person": {
+  "authId": 119,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Personen erstellen"
+ },
+ "churchdb:write access": {
+  "authId": 111,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Personen bearbeiten"
+ },
+ "churchdb:delete persons": {
+  "authId": 129,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Personen löschen"
+ },
+ "churchdb:push/pull archive": {
+  "authId": 118,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Personen archivieren"
+ },
+ "churchdb:view archive": {
+  "authId": 116,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Personenarchiv sehen"
+ },
+ "churchdb:view statistics": {
+  "authId": 106,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Personenstatistik sehen"
+ },
+ "churchdb:view person tags": {
+  "authId": 107,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Personen-Tags sehen"
+ },
+ "churchdb:view comments": {
+  "authId": 113,
+  "scopeField": "cdb_comment_viewer",
+  "revocable": false,
+  "desc": "Personen-Kommentare sehen"
+ },
+ "churchdb:export data": {
+  "authId": 112,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Personendaten exportieren"
+ },
+ "churchdb:edit bulkletter": {
+  "authId": 128,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Serienbriefe erstellen"
+ },
+ "churchdb:create print labels": {
+  "authId": 130,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Etiketten erstellen"
+ },
+ "churchdb:send sms": {
+  "authId": 117,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "SMS-Schnittstelle verwenden"
+ },
+ "churchdb:view person history": {
+  "authId": 108,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Personenhistorie sehen"
+ },
+ "churchdb:edit relations": {
+  "authId": 109,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Beziehungen bearbeiten"
+ },
+ "churchdb:view memberliste": {
+  "authId": 122,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Mitgliederliste sehen"
+ },
+ "churchdb:complex filter": {
+  "authId": 120,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "\"Weitere Filter\" verwenden"
+ },
+ "churchdb:administer global filters": {
+  "authId": 127,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Globale Filter verwalten"
+ },
+ "churchdb:edit masterdata": {
+  "authId": 199,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Stammdaten bearbeiten"
+ },
+ "churchdb:+see group": {
+  "authId": 10102,
+  "scopeField": "cc_securitylevel",
+  "revocable": false,
+  "desc": "Gruppeninfos sehen"
+ },
+ "churchdb:+edit group infos": {
+  "authId": 10122,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gruppeninfos bearbeiten"
+ },
+ "churchdb:+edit group basic settings": {
+  "authId": 10116,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Grundeinstellungen bearbeiten (Gruppenstatus, Sichtbarkeit, Anmeldung)"
+ },
+ "churchdb:+admin group member fields": {
+  "authId": 10117,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gruppenmitgliedsfelder verwalten"
+ },
+ "churchdb:+edit group hierarchy": {
+  "authId": 10114,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gruppenhierachie bearbeiten"
+ },
+ "churchdb:+create group": {
+  "authId": 10115,
+  "scopeField": "cdb_gruppentyp",
+  "revocable": false,
+  "desc": "Untergruppen erstellen und kopieren"
+ },
+ "churchdb:+see hidden group": {
+  "authId": 10119,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gruppe bei Sichtbarkeit \"Versteckt\" sehen"
+ },
+ "churchdb:+see group tags": {
+  "authId": 10105,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Tags der Gruppe sehen"
+ },
+ "churchdb:+see persons": {
+  "authId": 10101,
+  "scopeField": "cc_securitylevel",
+  "revocable": false,
+  "desc": "Gruppenmitglieder sehen"
+ },
+ "churchdb:+edit person fields of group members": {
+  "authId": 10106,
+  "scopeField": "cc_securitylevel",
+  "revocable": false,
+  "desc": "Personenfelder von Gruppenmitgliedern bearbeiten"
+ },
+ "churchdb:+see group member fields": {
+  "authId": 10126,
+  "scopeField": "cc_securitylevel",
+  "revocable": false,
+  "desc": "Gruppenmitgliedsfelder sehen"
+ },
+ "churchdb:+edit group member fields": {
+  "authId": 10133,
+  "scopeField": "cc_securitylevel",
+  "revocable": false,
+  "desc": "Gruppenmitgliedsfelder bearbeiten"
+ },
+ "churchdb:+see own group member fields": {
+  "authId": 10132,
+  "scopeField": "cc_securitylevel",
+  "revocable": false,
+  "desc": "Eigene Gruppenmitgliedsfelder sehen"
+ },
+ "churchdb:+edit own group member fields": {
+  "authId": 10125,
+  "scopeField": "cc_securitylevel",
+  "revocable": false,
+  "desc": "Eigene Gruppenmitgliedsfelder bearbeiten"
+ },
+ "churchdb:+edit basic group memberships": {
+  "authId": 10108,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gruppenmitgliedschaften bearbeiten (Rolle, Status, Bemerkung, etc.)"
+ },
+ "churchdb:+add person": {
+  "authId": 10107,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gruppenmitglieder hinzufügen"
+ },
+ "churchdb:+remove from group": {
+  "authId": 10118,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gruppenmitglieder entfernen"
+ },
+ "churchdb:+exit group": {
+  "authId": 10136,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Aus Gruppe austreten"
+ },
+ "churchdb:+invite person": {
+  "authId": 10103,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gruppenmitglieder zu ChurchTools einladen"
+ },
+ "churchdb:+export group members": {
+  "authId": 10112,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gruppenmitglieder exportieren"
+ },
+ "churchdb:+mail group members": {
+  "authId": 10113,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gruppenmitglieder kontaktieren"
+ },
+ "churchdb:+see tags": {
+  "authId": 10104,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Tags der Gruppenmitglieder sehen"
+ },
+ "churchdb:+admin routines": {
+  "authId": 10135,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Routinen verwalten"
+ },
+ "churchdb:+admin followup": {
+  "authId": 10123,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Follow-ups planen"
+ },
+ "churchdb:+do followup": {
+  "authId": 10110,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Follow-ups durchführen"
+ },
+ "churchdb:+admin meetings": {
+  "authId": 10124,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Einstellungen für Gruppentreffen bearbeiten"
+ },
+ "churchdb:+do group meeting": {
+  "authId": 10111,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gruppentreffen sehen und durchführen"
+ },
+ "churchdb:+create notes": {
+  "authId": 10134,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Notizen erstellen"
+ },
+ "churchdb:+view history": {
+  "authId": 10128,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Historie der Gruppenmitglieder sehen"
+ },
+ "churchdb:+admin group chat": {
+  "authId": 10121,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gruppen-Chat verwalten"
+ },
+ "churchdb:+get emails": {
+  "authId": 10109,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "E-Mails bei Änderungen bekommen"
+ },
+ "churchdb:+admin posts": {
+  "authId": 10129,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Beiträge verwalten"
+ },
+ "churchdb:+create post group intern": {
+  "authId": 10130,
+  "scopeField": null,
+  "revocable": true,
+  "desc": "Beiträge erstellen: Für Gruppenmitglieder"
+ },
+ "churchdb:+create post group visible": {
+  "authId": 10131,
+  "scopeField": null,
+  "revocable": true,
+  "desc": "Beiträge erstellen: Mit Sichtbarkeit der Gruppe"
+ },
+ "churchgroup:view": {
+  "authId": 1101,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "\"Gruppen\" sehen"
+ },
+ "churchgroup:view group": {
+  "authId": 1104,
+  "scopeField": "cdb_gruppe",
+  "revocable": false,
+  "desc": "Gruppe inkl. ihrer Gruppenmitglieder sehen"
+ },
+ "churchgroup:edit group": {
+  "authId": 1105,
+  "scopeField": "cdb_gruppe",
+  "revocable": false,
+  "desc": "Gruppe bearbeiten"
+ },
+ "churchgroup:delete group": {
+  "authId": 1106,
+  "scopeField": "cdb_gruppe",
+  "revocable": false,
+  "desc": "Gruppe löschen"
+ },
+ "churchgroup:create groups of grouptype": {
+  "authId": 1107,
+  "scopeField": "cdb_gruppentyp",
+  "revocable": false,
+  "desc": "Gruppen eines Gruppentyps erstellen"
+ },
+ "churchgroup:view groups of grouptype": {
+  "authId": 1108,
+  "scopeField": "cdb_gruppentyp",
+  "revocable": false,
+  "desc": "Gruppen eines Gruppentyps sehen - außer versteckte"
+ },
+ "churchgroup:edit groups of grouptype": {
+  "authId": 1109,
+  "scopeField": "cdb_gruppentyp",
+  "revocable": false,
+  "desc": "Gruppen eines Gruppentyps bearbeiten - außer versteckte"
+ },
+ "churchgroup:delete groups of grouptype": {
+  "authId": 1110,
+  "scopeField": "cdb_gruppentyp",
+  "revocable": false,
+  "desc": "Gruppen eines Gruppentyps löschen - außer versteckte"
+ },
+ "churchgroup:edit group memberships of grouptype": {
+  "authId": 1111,
+  "scopeField": "cdb_gruppentyp",
+  "revocable": false,
+  "desc": "Gruppenmitgliedschaften von Gruppen eines Gruppentyps bearbeiten"
+ },
+ "churchgroup:edit group memberships of group": {
+  "authId": 1112,
+  "scopeField": "cdb_gruppe",
+  "revocable": false,
+  "desc": "Gruppenmitgliedschaften einer Gruppe bearbeiten"
+ },
+ "churchgroup:administer groups": {
+  "authId": 1113,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gruppen verwalten - d.h. erstellen, bearbeiten, löschen und mehr"
+ },
+ "churchgroup:security level group": {
+  "authId": 1114,
+  "scopeField": "cc_securitylevel",
+  "revocable": false,
+  "desc": "Gruppeninfos sehen - bis zum gewählten Sicherheitslevel"
+ },
+ "churchgroup:view group history": {
+  "authId": 1102,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Historie der Gruppenmitglieder sehen"
+ },
+ "churchgroup:view group tags": {
+  "authId": 1103,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gruppen-Tags sehen"
+ },
+ "churchgroup:administer global views": {
+  "authId": 1115,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Globale gespeicherte Ansichten verwalten"
+ },
+ "churchgroup:edit masterdata": {
+  "authId": 1116,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Moduleinstellungen verwalten"
+ },
+ "churchcal:view": {
+  "authId": 401,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "\"Kalender\" sehen"
+ },
+ "churchcal:view category": {
+  "authId": 403,
+  "scopeField": "cc_calcategory",
+  "revocable": false,
+  "desc": "Einzelnen Kalender sehen"
+ },
+ "churchcal:edit category": {
+  "authId": 404,
+  "scopeField": "cc_calcategory",
+  "revocable": false,
+  "desc": "In einzelnen Kalendern Termine erstellen, bearbeiten etc."
+ },
+ "churchcal:edit calendar entry template": {
+  "authId": 410,
+  "scopeField": "cc_calcategory",
+  "revocable": false,
+  "desc": "In einzelnen Kalendern Terminvorlagen erstellen, bearbeiten etc."
+ },
+ "churchcal:assistance mode": {
+  "authId": 409,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Im Auftrag eines anderen Buchungen durchführen"
+ },
+ "churchcal:create personal category": {
+  "authId": 407,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Persönlichen Kalender erstellen"
+ },
+ "churchcal:admin personal category": {
+  "authId": 406,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Persönliche Kalender verwalten"
+ },
+ "churchcal:create group category": {
+  "authId": 408,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gruppenkalender erstellen"
+ },
+ "churchcal:admin group category": {
+  "authId": 405,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gruppenkalender verwalten"
+ },
+ "churchcal:admin church category": {
+  "authId": 402,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Gemeindekalender verwalten"
+ },
+ "churchcal:admin appointment tags": {
+  "authId": 411,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Termin-Tags verwalten"
+ },
+ "churchresource:view": {
+  "authId": 201,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "\"Ressourcen\" sehen"
+ },
+ "churchresource:view resource": {
+  "authId": 205,
+  "scopeField": "cr_resource",
+  "revocable": false,
+  "desc": "Ressource sehen"
+ },
+ "churchresource:create bookings": {
+  "authId": 206,
+  "scopeField": "cr_resource",
+  "revocable": false,
+  "desc": "Eigene Buchungsanfragen erstellen"
+ },
+ "churchresource:create virtual bookings": {
+  "authId": 204,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Anfragen für Ressourcen mit Mehrfachbuchung erstellen"
+ },
+ "churchresource:administer bookings": {
+  "authId": 202,
+  "scopeField": "cr_resource",
+  "revocable": false,
+  "desc": "Buchungen verwalten"
+ },
+ "churchresource:assistance mode": {
+  "authId": 203,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Im Auftrag eines anderen Buchungen durchführen"
+ },
+ "churchresource:edit masterdata": {
+  "authId": 299,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Stammdaten bearbeiten"
+ },
+ "churchservice:view": {
+  "authId": 301,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "\"Events\" sehen"
+ },
+ "churchservice:view servicegroup": {
+  "authId": 304,
+  "scopeField": "cs_servicegroup",
+  "revocable": false,
+  "desc": "Dienste einzelner Dienstkategorien sehen"
+ },
+ "churchservice:edit servicegroup": {
+  "authId": 305,
+  "scopeField": "cs_servicegroup",
+  "revocable": false,
+  "desc": "Dienste einzelner Dienstkategorien bearbeiten"
+ },
+ "churchservice:view history": {
+  "authId": 302,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Historie der Anfragen anschauen"
+ },
+ "churchservice:view events": {
+  "authId": 306,
+  "scopeField": "cc_calcategory",
+  "revocable": false,
+  "desc": "Events von einzelnen Kalendern sehen"
+ },
+ "churchservice:edit events": {
+  "authId": 303,
+  "scopeField": "cc_calcategory",
+  "revocable": false,
+  "desc": "Events erstellen, bearbeiten, löschen"
+ },
+ "churchservice:edit template": {
+  "authId": 309,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Eventvorlagen bearbeiten"
+ },
+ "churchservice:manage absent": {
+  "authId": 307,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Abwesenheiten für alle Personen sehen und pflegen"
+ },
+ "churchservice:view fact": {
+  "authId": 321,
+  "scopeField": "cs_fact",
+  "revocable": false,
+  "desc": "Fakten sehen"
+ },
+ "churchservice:edit fact": {
+  "authId": 308,
+  "scopeField": "cs_fact",
+  "revocable": false,
+  "desc": "Fakten bearbeiten"
+ },
+ "churchservice:export facts": {
+  "authId": 322,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Fakten exportieren"
+ },
+ "churchservice:view agenda": {
+  "authId": 331,
+  "scopeField": "cc_calcategory",
+  "revocable": false,
+  "desc": "Ablaufpläne für einzelne Kalender sehen"
+ },
+ "churchservice:edit agenda": {
+  "authId": 332,
+  "scopeField": "cc_calcategory",
+  "revocable": false,
+  "desc": "Ablaufpläne für einzelne Kalender bearbeiten"
+ },
+ "churchservice:edit agenda templates": {
+  "authId": 333,
+  "scopeField": "cc_calcategory",
+  "revocable": false,
+  "desc": "Ablaufplanvorlagen für einzelne Kalender bearbeiten"
+ },
+ "churchservice:view songcategory": {
+  "authId": 313,
+  "scopeField": "cs_songcategory",
+  "revocable": false,
+  "desc": "Einzelne Song-Kategorien sehen"
+ },
+ "churchservice:edit songcategory": {
+  "authId": 312,
+  "scopeField": "cs_songcategory",
+  "revocable": false,
+  "desc": "Songs bearbeiten und Dateien hochladen"
+ },
+ "churchservice:view song statistics": {
+  "authId": 314,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Song-Statistik sehen"
+ },
+ "churchservice:use ccli": {
+  "authId": 341,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Darf CCLI in \"Events\" verwenden"
+ },
+ "churchservice:edit masterdata": {
+  "authId": 399,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Stammdaten bearbeiten"
+ },
+ "churchservice:+view service": {
+  "authId": 10301,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Dienste sehen"
+ },
+ "churchservice:+entry free": {
+  "authId": 10302,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "In freie Dienste eintragen"
+ },
+ "churchservice:+entry all": {
+  "authId": 10303,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Planer, d.h. auch besetzte Dienste bearbeiten"
+ },
+ "churchservice:+edit service": {
+  "authId": 10304,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Dienste zum Event zuordnen und entfernen"
+ },
+ "churchservice:+admin service": {
+  "authId": 10305,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Stammdaten von Diensten bearbeiten"
+ },
+ "churchservice:+see workload": {
+  "authId": 10306,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Auslastung sehen"
+ },
+ "churchservice:+see history": {
+  "authId": 10307,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Historie des Dienstes sehen"
+ },
+ "churchservice:+see reason": {
+  "authId": 10308,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Absage- und evtl. Zusagekommentare sehen"
+ },
+ "churchservice:+attach file": {
+  "authId": 10309,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Datei zum Event hochladen"
+ },
+ "churchservice:+edit info": {
+  "authId": 10310,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Eventinfo bearbeiten"
+ },
+ "churchservice:+edit event": {
+  "authId": 10311,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Event bearbeiten"
+ },
+ "churchservice:+edit agenda": {
+  "authId": 10313,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Ablaufplan bearbeiten"
+ },
+ "churchservice:+view absence": {
+  "authId": 10321,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Abwesenheit sehen"
+ },
+ "churchservice:+start event chat": {
+  "authId": 10322,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Event-Chat starten"
+ },
+ "churchwiki:view": {
+  "authId": 501,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "\"Wiki\" sehen"
+ },
+ "churchwiki:view category": {
+  "authId": 502,
+  "scopeField": "cc_wikicategory",
+  "revocable": false,
+  "desc": "Einzelne Wiki-Kategorien sehen"
+ },
+ "churchwiki:edit category": {
+  "authId": 503,
+  "scopeField": "cc_wikicategory",
+  "revocable": false,
+  "desc": "Einzelne Wiki-Kategorien bearbeiten"
+ },
+ "churchwiki:edit masterdata": {
+  "authId": 599,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Stammdaten bearbeiten"
+ },
+ "churchreport:view": {
+  "authId": 701,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "\"Report\" sehen"
+ },
+ "churchreport:view query": {
+  "authId": 702,
+  "scopeField": "crp_query",
+  "revocable": false,
+  "desc": "Abfrage aufrufen"
+ },
+ "finance:view": {
+  "authId": 901,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Finanzen sehen"
+ },
+ "finance:view accounting period": {
+  "authId": 902,
+  "scopeField": "cf_accounting_periods",
+  "revocable": false,
+  "desc": "Buchungsjahre und Mandanten sehen"
+ },
+ "finance:edit accounting period": {
+  "authId": 903,
+  "scopeField": "cf_accounting_periods",
+  "revocable": false,
+  "desc": "Buchungen für Buchungsjahr und Mandant erstellen und bearbeiten"
+ },
+ "finance:edit masterdata": {
+  "authId": 999,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Stammdaten bearbeiten"
+ },
+ "finance:+see cost center budgets": {
+  "authId": 10904,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Budgets in verknüpften Kostenstellen sehen"
+ },
+ "finance:+see cost centers": {
+  "authId": 10901,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Buchungen und Budgets  in verknüpften Kostenstellen sehen"
+ },
+ "finance:+see donators in cost centers": {
+  "authId": 10903,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Spender in verknüpften Kostenstellen sehen"
+ },
+ "finance:+allow posting": {
+  "authId": 10902,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Buchungen für verknüpfte Kostenstellen erstellen"
+ },
+ "churchsync:view": {
+  "authId": 1001,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Sync sehen und verwalten"
+ },
+ "jpmFlowManagerPreview:view": {
+  "authId": 2080,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "\"Flow 2.0 (Beta)\" sehen"
+ },
+ "jpmFlowManagerPreview:view custom category": {
+  "authId": 2081,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Kategorien sehen"
+ },
+ "jpmFlowManagerPreview:create custom category": {
+  "authId": 2082,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Kategorien erstellen"
+ },
+ "jpmFlowManagerPreview:edit custom category": {
+  "authId": 2083,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Kategorien bearbeiten"
+ },
+ "jpmFlowManagerPreview:delete custom category": {
+  "authId": 2084,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Kategorien löschen"
+ },
+ "jpmFlowManagerPreview:view custom data": {
+  "authId": 2085,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Daten in Kategorie sehen"
+ },
+ "jpmFlowManagerPreview:create custom data": {
+  "authId": 2086,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Daten in Kategorie erstellen"
+ },
+ "jpmFlowManagerPreview:edit custom data": {
+  "authId": 2087,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Daten in Kategorie bearbeiten"
+ },
+ "jpmFlowManagerPreview:delete custom data": {
+  "authId": 2088,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Daten in Kategorie löschen"
+ },
+ "group_hierarchies:view": {
+  "authId": 2070,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "\"Admin\" sehen"
+ },
+ "group_hierarchies:view custom category": {
+  "authId": 2071,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Kategorien sehen"
+ },
+ "group_hierarchies:create custom category": {
+  "authId": 2072,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Kategorien erstellen"
+ },
+ "group_hierarchies:edit custom category": {
+  "authId": 2073,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Kategorien bearbeiten"
+ },
+ "group_hierarchies:delete custom category": {
+  "authId": 2074,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Kategorien löschen"
+ },
+ "group_hierarchies:view custom data": {
+  "authId": 2075,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Daten in Kategorie sehen"
+ },
+ "group_hierarchies:create custom data": {
+  "authId": 2076,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Daten in Kategorie erstellen"
+ },
+ "group_hierarchies:edit custom data": {
+  "authId": 2077,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Daten in Kategorie bearbeiten"
+ },
+ "group_hierarchies:delete custom data": {
+  "authId": 2078,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Daten in Kategorie löschen"
+ },
+ "jpmFlowManager:view": {
+  "authId": 2050,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "\"Flow\" sehen"
+ },
+ "jpmFlowManager:view custom category": {
+  "authId": 2051,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Kategorien sehen"
+ },
+ "jpmFlowManager:create custom category": {
+  "authId": 2052,
+  "scopeField": null,
+  "revocable": false,
+  "desc": "Kategorien erstellen"
+ },
+ "jpmFlowManager:edit custom category": {
+  "authId": 2053,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Kategorien bearbeiten"
+ },
+ "jpmFlowManager:delete custom category": {
+  "authId": 2054,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Kategorien löschen"
+ },
+ "jpmFlowManager:view custom data": {
+  "authId": 2055,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Daten in Kategorie sehen"
+ },
+ "jpmFlowManager:create custom data": {
+  "authId": 2056,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Daten in Kategorie erstellen"
+ },
+ "jpmFlowManager:edit custom data": {
+  "authId": 2057,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Daten in Kategorie bearbeiten"
+ },
+ "jpmFlowManager:delete custom data": {
+  "authId": 2058,
+  "scopeField": "ccm_data_category",
+  "revocable": false,
+  "desc": "Daten in Kategorie löschen"
+ }
+}

@@ -41,6 +41,8 @@ type Server struct {
 	// job (19): the "Aktiv" checkbox is locked in its own UI, and the PUT reply
 	// already carries the old value (eqrm-dev, 2026-10-02).
 	ignoreOnPut map[string]map[string]bool
+	// perm holds the permission routes' state (permissions.go).
+	perm *permState
 }
 
 func New() *Server {
@@ -345,6 +347,10 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 
 	if r.URL.Path == legacyPath {
 		s.handleLegacy(w, r)
+		return
+	}
+
+	if s.handlePermissions(w, r) {
 		return
 	}
 
