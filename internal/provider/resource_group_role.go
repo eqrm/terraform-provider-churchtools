@@ -208,7 +208,12 @@ func (r *groupRoleResource) Read(ctx context.Context, req resource.ReadRequest, 
 		return
 	}
 	d := state.data()
-	if !r.svc().read(ctx, id, state.label(role), "Rollenrechte konnten nicht gelesen werden", d, &resp.Diagnostics) {
+	ok, gone := r.svc().read(ctx, id, state.label(role), "Rollenrechte konnten nicht gelesen werden", d, &resp.Diagnostics)
+	if gone {
+		resp.State.RemoveResource(ctx)
+		return
+	}
+	if !ok {
 		return
 	}
 	state.setData(d)

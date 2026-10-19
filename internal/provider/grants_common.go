@@ -13,8 +13,10 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -546,16 +548,22 @@ func (s grantsService) create(ctx context.Context, id, label, summary string, d 
 }
 
 // read refreshes d from the live rows of domain `id`.
-func (s grantsService) read(ctx context.Context, id, label, summary string, d *grantsData, diags *diag.Diagnostics) bool {
+//
+// gone reports a domain that no longer exists (404): the caller removes the
+// resource from state. Otherwise ok tells whether d was refreshed.
+func (s grantsService) read(ctx context.Context, id, label, summary string, d *grantsData, diags *diag.Diagnostics) (ok, gone bool) {
 	prior, dd := rowsFromSet(ctx, d.Grants)
 	diags.Append(dd...)
 	if diags.HasError() {
-		return false
+		return false, false
 	}
 	live, err := s.client.PermissionRows(ctx, s.kind.domain, id)
+	if isNotFound(err) {
+		return false, true
+	}
 	if err != nil {
 		diags.AddError(summary, err.Error())
-		return false
+		return false, false
 	}
 	var declared map[grants.Row]bool
 	if prior != nil {
@@ -584,7 +592,7 @@ func (s grantsService) read(ctx context.Context, id, label, summary string, d *g
 	diags.Append(dd...)
 	d.Grants = set
 	d.Preserved = preservedSet(res.Preserved)
-	return true
+	return true, false
 }
 
 // update reconciles domain `id` from state to plan.
@@ -625,4 +633,13 @@ func grantsDeleteWarning(diags *diag.Diagnostics, whose string) {
 		fmt.Sprintf("Die Rechte %s werden von diesem Provider beim Entfernen der Ressource nicht entzogen. "+
 			"Die Ressource wurde nur aus dem Terraform-State entfernt; die Rechte gelten in ChurchTools weiter. "+
 			"Wer sie entziehen will, entfernt zuerst die grant-Blöcke und wendet das an.", whose))
+}
+
+// isNotFound reports a 404 from CT, however the client wrapped it.
+func isNotFound(err error) bool {
+	if errors.Is(err, client.ErrNotFound) {
+		return true
+	}
+	_, ok := client.IsStatus(err, http.StatusNotFound)
+	return ok
 }

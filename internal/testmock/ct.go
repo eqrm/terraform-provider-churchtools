@@ -43,6 +43,9 @@ type Server struct {
 	ignoreOnPut map[string]map[string]bool
 	// perm holds the permission routes' state (permissions.go).
 	perm *permState
+	// roleMembers makes DELETE /group/roles/{id} answer 409 (roles.go).
+	roleMembers map[string]int
+	roleDeletes int
 }
 
 func New() *Server {
@@ -314,6 +317,14 @@ var supportedVerbs = map[string]map[string]bool{
 		http.MethodPut:    true,
 		http.MethodDelete: true,
 	},
+	// Group-type role definitions (CT 3.137 OpenAPI): GET list, POST 201, PUT 200
+	// with the updated row, DELETE 204 or 409 with a deletion report. See roles.go.
+	"/group/roles": {
+		http.MethodGet:    true,
+		http.MethodPost:   true,
+		http.MethodPut:    true,
+		http.MethodDelete: true,
+	},
 	// The session handshake the legacy endpoint requires.
 	"/whoami":    {http.MethodGet: true},
 	"/csrftoken": {http.MethodGet: true},
@@ -405,6 +416,10 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 
 	if s.rows[collection] == nil {
 		s.rows[collection] = map[string]any{}
+	}
+
+	if collection == "/group/roles" && s.handleRoleWrite(w, r, id) {
+		return
 	}
 
 	switch {
