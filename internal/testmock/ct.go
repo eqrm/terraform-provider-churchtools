@@ -43,6 +43,61 @@ type Server struct {
 	ignoreOnPut map[string]map[string]bool
 	// perm holds the permission routes' state (permissions.go).
 	perm *permState
+
+	// Login accounting. Live ChurchTools logs "Erfolgreich angemeldet ...
+	// mittels logintoken" for every request that presents the token, whether
+	// as /whoami?login_token= or as `Authorization: Login`. logins counts
+	// exactly those.
+	logins int
+	// sessions are the cookies /whoami has issued and not yet expired.
+	sessions   map[string]bool
+	sessionSeq int
+	// strictSessions makes REST and legacy routes demand an issued cookie (and
+	// the CSRF token on writes), as a live instance does.
+	strictSessions bool
+	// whoami429 is how many /whoami calls still answer 429; retryAfter is the
+	// header they carry.
+	whoami429  int
+	retryAfter string
+}
+
+// Logins is how many requests presented the login token so far.
+func (s *Server) Logins() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.logins
+}
+
+// Whoami429Left is how many 429 answers are still queued for /whoami.
+func (s *Server) Whoami429Left() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.whoami429
+}
+
+// StrictSessions makes the mock reject any request without a cookie issued by
+// /whoami (and any write without the CSRF token), so a test proves the client
+// really authenticates by session rather than by a header the mock ignores.
+func (s *Server) StrictSessions() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.strictSessions = true
+}
+
+// ExpireSessions invalidates every cookie issued so far, as a CT session
+// timeout does: the next request carrying one gets a 401.
+func (s *Server) ExpireSessions() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions = map[string]bool{}
+}
+
+// RateLimitWhoami makes the next n /whoami calls answer 429 with the given
+// Retry-After value (seconds, may be "").
+func (s *Server) RateLimitWhoami(n int, retryAfter string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.whoami429, s.retryAfter = n, retryAfter
 }
 
 func New() *Server {
@@ -332,6 +387,37 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if strings.HasPrefix(r.Header.Get("Authorization"), "Login ") {
+		s.logins++
+	}
+	if r.URL.Path == "/api/whoami" {
+		if r.URL.Query().Get("login_token") != "" {
+			s.logins++
+		}
+		if s.whoami429 > 0 {
+			s.whoami429--
+			if s.retryAfter != "" {
+				w.Header().Set("Retry-After", s.retryAfter)
+			}
+			w.WriteHeader(http.StatusTooManyRequests)
+			writeData(w, map[string]any{"message": "too many logins"})
+			return
+		}
+	}
+	if s.strictSessions && r.URL.Path != "/api/whoami" && r.URL.Path != "/api/csrftoken" {
+		ck, err := r.Cookie("ChurchTools_ct")
+		if err != nil || !s.sessions[ck.Value] {
+			w.WriteHeader(http.StatusUnauthorized)
+			writeData(w, map[string]any{"message": "no or expired session"})
+			return
+		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get("CSRF-Token") != "csrf-test-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			writeData(w, map[string]any{"message": "CSRF-Token is invalid"})
+			return
+		}
+	}
+
 	if s.requireCookie != "" {
 		if r.Header.Get("Cookie") != s.requireCookie {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -390,7 +476,13 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			writeData(w, map[string]any{"message": "login_token query param required"})
 			return
 		}
-		http.SetCookie(w, &http.Cookie{Name: "ChurchTools_ct", Value: "session-" + strconv.Itoa(s.nextID)})
+		s.sessionSeq++
+		val := "session-" + strconv.Itoa(s.sessionSeq)
+		if s.sessions == nil {
+			s.sessions = map[string]bool{}
+		}
+		s.sessions[val] = true
+		http.SetCookie(w, &http.Cookie{Name: "ChurchTools_ct", Value: val})
 		writeData(w, map[string]any{"id": 1, "firstName": "Test"})
 		return
 	case "/csrftoken":

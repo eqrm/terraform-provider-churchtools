@@ -236,6 +236,16 @@ invalidating every other use of it, so a copy in a `.tfvars`, a CI variable or a
 `TF_LOG=DEBUG` transcript outlives whoever put it there. That asymmetry is the
 whole reason the session mode exists.
 
+In token mode the provider logs in **once per run**: it exchanges the token for a
+session (`GET /api/whoami?login_token=…`, then `GET /api/csrftoken`) on the first
+request, shares that session between all resources, and sends it as a cookie
+(plus the CSRF header on writes) instead of repeating `Authorization: Login` on
+every call, which ChurchTools logs as one login per request. If the session
+lapses mid-run, the provider logs in again once and retries the refused request
+once; a login answered with 429 is retried with `Retry-After` (bounded, a few
+attempts) and then fails with a clear error. The token never appears in
+diagnostics. Session mode never logs in.
+
 Set exactly one of the two. Supplying both is an error rather than a precedence
 rule: an author who thinks the credential they just added is the live one, and
 is wrong, authenticates as the wrong identity with nothing to tell them so.

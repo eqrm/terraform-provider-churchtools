@@ -57,15 +57,19 @@ type Client struct {
 	fixedCookie string
 	fixedCSRF   string
 
-	// Legacy-endpoint session (see session.go). Acquired lazily: a run that
-	// only touches REST resources never performs the handshake.
+	// The session bought with the login token (see session.go), acquired lazily
+	// on the first request and shared by REST and the legacy endpoint.
 	//
 	// One Client is shared by every resource (see provider.ProviderData) and
-	// Terraform applies resources concurrently, so these two fields are written
-	// from several goroutines and need the mutex.
+	// Terraform applies resources concurrently, so these fields are written
+	// from several goroutines and need the mutex. The mutex is held across the
+	// handshake, which is what makes it single-flight.
 	sessionMu sync.Mutex
 	cookie    string
 	csrfToken string
+	// handshakeErr remembers a failed handshake so the other ~340 resources do
+	// not each retry it against a host that is already refusing logins.
+	handshakeErr error
 
 	// See LockMasterDataCreate.
 	masterDataCreateMu sync.Mutex
@@ -131,20 +135,26 @@ func NewWithSession(baseURL, cookie, csrf string) *Client {
 // exported and is not obliged to be called through it.
 func (c *Client) usesSession() bool { return c.fixedCookie != "" || c.fixedCSRF != "" }
 
-// authenticate applies whichever credential this client holds.
+// credentials returns the cookie and CSRF token every REST call carries.
 //
-// Token mode sends `Authorization: Login <token>`, which ChurchTools accepts on
-// every REST route. Session mode sends the cookie instead and adds the CSRF
-// header to writes -- exactly what a browser does, and what ct-cli has always
-// done for its own REST calls once its handshake completed.
-func (c *Client) authenticate(req *http.Request, method string) {
-	if !c.usesSession() {
-		req.Header.Set("Authorization", "Login "+c.token)
-		return
-	}
-	req.Header.Set("Cookie", c.fixedCookie)
+// Both modes authenticate the same way on the wire -- the session cookie, plus
+// the CSRF header on writes, exactly what a browser does. They differ only in
+// where the session comes from: session mode was handed one by the operator;
+// token mode buys one ONCE per Client (session.go) and reuses it.
+//
+// Token mode used to send `Authorization: Login <token>` on every request.
+// ChurchTools treats each such request as a fresh login ("Erfolgreich
+// angemeldet ... mittels logintoken" in its log), so a plan over ~340 objects
+// meant ~340 logins and tripped the login rate limit (HTTP 429).
+func (c *Client) credentials(ctx context.Context) (cookie, csrf string, err error) {
+	return c.session(ctx)
+}
+
+// setAuth applies a session to a request: cookie always, CSRF on writes.
+func setAuth(req *http.Request, method, cookie, csrf string) {
+	req.Header.Set("Cookie", cookie)
 	if method != http.MethodGet && method != http.MethodHead {
-		req.Header.Set("CSRF-Token", c.fixedCSRF)
+		req.Header.Set("CSRF-Token", csrf)
 	}
 }
 
@@ -169,36 +179,42 @@ func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte,
 	if c == nil {
 		return nil, fmt.Errorf("%w: %s %s", ErrNotConfigured, method, path)
 	}
-	var buf io.Reader
+	var payload []byte
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return nil, fmt.Errorf("churchtools: encoding request body: %w", err)
 		}
-		buf = bytes.NewReader(b)
+		payload = b
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+"/api"+path, buf)
+	cookie, csrf, err := c.credentials(ctx)
 	if err != nil {
 		return nil, err
 	}
-	c.authenticate(req, method)
-	req.Header.Set("Accept", "application/json")
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	resp, err := c.http.Do(req)
+	status, raw, err := c.roundTrip(ctx, method, path, payload, cookie, csrf)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
+	if status == http.StatusUnauthorized && !c.usesSession() {
+		// The session we bought has lapsed. Renew it ONCE (shared: concurrent
+		// requests that all saw the 401 trigger a single login) and retry this
+		// request ONCE. A second 401 is not an expiry, so no further loop.
+		cookie, csrf, err = c.renewSession(ctx, cookie)
+		if err != nil {
+			return nil, err
+		}
+		status, raw, err = c.roundTrip(ctx, method, path, payload, cookie, csrf)
+		if err != nil {
+			return nil, err
+		}
+		if status == http.StatusUnauthorized {
+			return nil, fmt.Errorf("churchtools: %s %s was refused (401) even with a freshly "+
+				"acquired session; the login token is probably not allowed to do this: %w",
+				method, path, &StatusError{Method: method, Path: path, Status: status, Body: string(raw)})
+		}
 	}
-	if resp.StatusCode == http.StatusUnauthorized && c.usesSession() {
+	if status == http.StatusUnauthorized && c.usesSession() {
 		// ct-cli calls its `expiresAt` a ceiling, not a promise: ChurchTools does
 		// not advertise a session lifetime, so a 401 here is expected eventually
 		// rather than exceptional. Say what to do about it.
@@ -209,10 +225,38 @@ func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte,
 			"helper fetches a fresh one (e.g. `ct auth token`). The provider cannot renew a "+
 			"session it was handed", ErrSessionExpired, method, path, strings.TrimSpace(string(raw)))
 	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, &StatusError{Method: method, Path: path, Status: resp.StatusCode, Body: string(raw)}
+	if status < 200 || status > 299 {
+		return nil, &StatusError{Method: method, Path: path, Status: status, Body: string(raw)}
 	}
 	return raw, nil
+}
+
+// roundTrip performs one authenticated REST request and returns the status and
+// body without judging them.
+func (c *Client) roundTrip(ctx context.Context, method, path string, payload []byte, cookie, csrf string) (int, []byte, error) {
+	var buf io.Reader
+	if payload != nil {
+		buf = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+"/api"+path, buf)
+	if err != nil {
+		return 0, nil, err
+	}
+	setAuth(req, method, cookie, csrf)
+	req.Header.Set("Accept", "application/json")
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, nil, err
+	}
+	return resp.StatusCode, raw, nil
 }
 
 // doItem is do for a path that addresses ONE row. It refuses an empty id and is
@@ -276,33 +320,4 @@ func (e envelope) morePages(page int) bool {
 		return false
 	}
 	return *p.Current < *p.LastPage
-}
-
-// doWithCookie is do() plus the session cookie. The CSRF read needs the cookie
-// from the whoami step, and that step is the only thing that can set it.
-// doWithCookie is a GET-style read that carries the session cookie. It sends no
-// body: the only call that needs one goes through AjaxJSON.
-func (c *Client) doWithCookie(ctx context.Context, method, path string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+"/api"+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	c.authenticate(req, method)
-	req.Header.Set("Accept", "application/json")
-	if !c.usesSession() && c.cookie != "" {
-		req.Header.Set("Cookie", c.cookie)
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, fmt.Errorf("churchtools: %s %s returned %d: %s", method, path, resp.StatusCode, string(raw))
-	}
-	return raw, nil
 }
