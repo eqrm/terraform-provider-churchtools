@@ -249,20 +249,101 @@ import {
 	})
 }
 
-// CT answers 204 to a grant of a module the host lacks and stores nothing
-// (eqrm-dev: churchreport 701/702, jpmFlowManagerPreview 2080). The read-back
-// turns that into an error instead of a state that lies.
-func TestAccGroupRole_InactiveModule(t *testing.T) {
+// The same declaration on a host that lacks the module: the grant is skipped
+// with a warning, never written, never read back, and the plan stays clean over
+// repeated runs. The strict neighbours are still applied.
+func TestAccGroupRole_UnofferedRightSkipped(t *testing.T) {
 	mock := testmock.New()
 	defer mock.Close()
 	seedSLL(mock)
-	mock.SetInactiveAuthIDs(701)
+	mock.SetInactiveAuthIDs(701, 702, 2080)
+	cfg := providerBlock(mock.URL) + fmt.Sprintf(sllConfig, `grant { right = "churchreport:view" }
+  grant { right = "jpmFlowManagerPreview:view" }`)
+	noUnofferedWrite := func(*terraform.State) error {
+		for _, w := range mock.PermissionWrites() {
+			if strings.HasPrefix(w, "PUT 701") || strings.HasPrefix(w, "PUT 2080") {
+				return fmt.Errorf("wrote an unoffered right: %q", w)
+			}
+		}
+		if mock.AuthTableCalls() == 0 {
+			return fmt.Errorf("the host's right table was never asked for")
+		}
+		return nil
+	}
+	clean := resource.TestStep{Config: cfg, PlanOnly: true}
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: cfg, Check: resource.ComposeAggregateTestCheckFunc(
+				noUnofferedWrite,
+				resource.TestCheckResourceAttr("churchtools_group_role.mitglied", "grant.#", "4"),
+			)},
+			clean, clean, clean, // plan stability over three runs
+			{Config: cfg, ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+				plancheck.ExpectEmptyPlan(),
+			}}},
+		},
+	})
+}
+
+// A right the host offers keeps the strict guard even when the host lacks
+// OTHER modules: 204 without a stored row is an error.
+func TestAccGroupRole_OfferedRightStaysStrict(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedSLL(mock)
+	mock.SetInactiveAuthIDs(2080)
+	mock.SetDroppedAuthIDs(701)
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: protoV6(),
 		Steps: []resource.TestStep{{
 			Config:      providerBlock(mock.URL) + fmt.Sprintf(sllConfig, `grant { right = "churchreport:view" }`),
-			ExpectError: regexp.MustCompile(`nicht aktiv`),
+			ExpectError: regexp.MustCompile(`nicht gespeichert`),
 		}},
+	})
+}
+
+// If the host's right table cannot be read, nothing is skipped: the grant takes
+// the strict path and its missing read-back is an error naming the reason.
+func TestAccGroupRole_UnofferedFailsClosed(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedSLL(mock)
+	mock.SetInactiveAuthIDs(701)
+	mock.FailAuthTable()
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{{
+			Config:      providerBlock(mock.URL) + fmt.Sprintf(sllConfig, `grant { right = "churchreport:view" }`),
+			ExpectError: regexp.MustCompile(`nicht gespeichert(.|\n)*nichts\s+übersprungen`),
+		}},
+	})
+	if w := mock.PermissionWrites(); strings.Join(w, "; ") != "PUT 701" {
+		t.Fatalf("writes %q, want only the strict PUT 701", w)
+	}
+}
+
+// An unreadable right table must not block grants the host stores: adding
+// one, or refreshing over one deleted in the UI (a token without churchauth
+// access, a failing session handshake).
+func TestAccGroupRole_StoredGrantsNeedNoRightTable(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedSLL(mock)
+	mock.FailAuthTable()
+	cfg := providerBlock(mock.URL) + fmt.Sprintf(sllConfig, queryGrant)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: cfg, Check: lastWrites(mock, "PUT 702 [3]")},
+			{
+				// Deleted in the UI: plain drift, the plan re-adds it.
+				PreConfig:          func() { mock.SeedPermissions(16829, mock.Permissions(16829)[:2]) },
+				Config:             cfg,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+		},
 	})
 }
 

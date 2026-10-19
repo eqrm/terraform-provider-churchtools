@@ -486,3 +486,30 @@ func TestUpdate_NoContentIsSuccess(t *testing.T) {
 		t.Fatalf("err = %v, want nil for a 204", err)
 	}
 }
+
+// The host's own right table: a module the host lacks is simply absent, the
+// answer is cached per client, and a failure is an error (never an empty set).
+func TestOfferedAuthIDs(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	mock.SetInactiveAuthIDs(701, 2080)
+	c := New(mock.URL, "tok")
+	got, err := c.OfferedAuthIDs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[701] || got[2080] || !got[702] || !got[102] {
+		t.Fatalf("offered set wrong: 701=%v 2080=%v 702=%v 102=%v", got[701], got[2080], got[702], got[102])
+	}
+	if _, err := c.OfferedAuthIDs(context.Background()); err != nil || mock.AuthTableCalls() != 1 {
+		t.Fatalf("not cached: err=%v calls=%d", err, mock.AuthTableCalls())
+	}
+
+	failing := testmock.New()
+	defer failing.Close()
+	failing.FailAuthTable()
+	fc := New(failing.URL, "tok")
+	if ids, err := fc.OfferedAuthIDs(context.Background()); err == nil || ids != nil {
+		t.Fatalf("want an error and no set, got %v, %v", ids, err)
+	}
+}

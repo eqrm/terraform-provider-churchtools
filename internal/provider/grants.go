@@ -443,9 +443,8 @@ func verifyGrantWrites(desired, removed []grantRow, live []client.PermissionRow)
 	}
 	var b strings.Builder
 	if len(missing) > 0 {
-		fmt.Fprintf(&b, "ChurchTools hat diese Rechte angenommen (204), aber nicht gespeichert: %s. "+
-			"Häufigste Ursache: das Modul des Rechts ist auf dieser Instanz nicht aktiv "+
-			"(auf eqrm-dev z. B. churchreport und jpmFlowManagerPreview).", strings.Join(missing, ", "))
+		fmt.Fprintf(&b, "ChurchTools hat diese Rechte angenommen (204), aber nicht gespeichert: %s.",
+			strings.Join(missing, ", "))
 	}
 	if len(stuck) > 0 {
 		if b.Len() > 0 {
@@ -454,6 +453,38 @@ func verifyGrantWrites(desired, removed []grantRow, live []client.PermissionRow)
 		fmt.Fprintf(&b, "Diese Rechte sind nach dem Entziehen noch vorhanden: %s.", strings.Join(stuck, ", "))
 	}
 	return fmt.Errorf("%s", b.String())
+}
+
+// absentRows are the rows of `want` that no live grant row carries.
+func absentRows(want []grantRow, live []client.PermissionRow) []grantRow {
+	have := map[grantRow]bool{}
+	for _, lr := range live {
+		if lr.Type == "grant" {
+			have[rowOf(lr)] = true
+		}
+	}
+	var out []grantRow
+	for _, w := range want {
+		if !have[w] {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// splitUnoffered separates rows whose right the host does not offer (its own
+// right table, client.OfferedAuthIDs) from the rest. The unoffered ones are
+// never written, never read back and never revoked: CT answers 204 to such a
+// PUT and stores nothing, so there is nothing to manage on that host.
+func splitUnoffered(rows []grantRow, offered map[int64]bool) (keep, skipped []grantRow) {
+	for _, r := range rows {
+		if offered[r.AuthID] {
+			keep = append(keep, r)
+		} else {
+			skipped = append(skipped, r)
+		}
+	}
+	return keep, skipped
 }
 
 // removedRows is prior minus desired: what an apply meant to revoke.

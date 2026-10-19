@@ -49,10 +49,13 @@ func (r PermRow) same(o PermRow) bool {
 }
 
 type permState struct {
-	groupRoles map[string][]map[string]any // group id -> /groups/{id}/roles rows
-	rows       map[string][]PermRow        // pairing id -> rows
-	inactive   map[int64]bool
-	writes     []string
+	groupRoles     map[string][]map[string]any // group id -> /groups/{id}/roles rows
+	rows           map[string][]PermRow        // pairing id -> rows
+	inactive       map[int64]bool
+	dropped        map[int64]bool
+	authTableFails bool
+	authTableCalls int
+	writes         []string
 }
 
 func (s *Server) perms() *permState {
@@ -116,6 +119,55 @@ func (s *Server) SetInactiveAuthIDs(ids ...int64) {
 	for _, id := range ids {
 		s.perms().inactive[id] = true
 	}
+}
+
+// SetDroppedAuthIDs makes PUTs for these authIds answer 204 without storing
+// although the host still lists the right in its table.
+func (s *Server) SetDroppedAuthIDs(ids ...int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.perms().dropped == nil {
+		s.perms().dropped = map[int64]bool{}
+	}
+	for _, id := range ids {
+		s.perms().dropped[id] = true
+	}
+}
+
+// FailAuthTable makes getMasterData answer an error envelope, so the provider
+// cannot learn which rights the host offers.
+func (s *Server) FailAuthTable() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.perms().authTableFails = true
+}
+
+// AuthTableCalls counts how often the host's right table was asked for.
+func (s *Server) AuthTableCalls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.perms().authTableCalls
+}
+
+// authTable is data.auth_table of churchauth/ajax getMasterData: {module:
+// {right: {id}}}. A host lacking a module does not list its rights, which is
+// what SetInactiveAuthIDs models on the PUT side. The mock has no catalog, so
+// it offers every id of the ranges the real table uses (1..2100, 10000..10999)
+// except the inactive ones.
+func (ps *permState) authTable() map[string]any {
+	rights := map[string]any{}
+	add := func(id int64) {
+		if !ps.inactive[id] {
+			rights["right"+strconv.FormatInt(id, 10)] = map[string]any{"id": id}
+		}
+	}
+	for id := int64(1); id <= 2100; id++ {
+		add(id)
+	}
+	for id := int64(10000); id <= 10999; id++ {
+		add(id)
+	}
+	return map[string]any{"mock": rights}
 }
 
 // handlePermissions serves the permission routes and reports whether it did.
@@ -200,6 +252,12 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) bool 
 	typ := body.Type
 	if typ == "" {
 		typ = "grant"
+	}
+	if ps.dropped[auth] {
+		// a host that OFFERS the right yet does not store this write (a bug, a
+		// permission quirk): the case the read-back guard exists for.
+		w.WriteHeader(http.StatusNoContent)
+		return true
 	}
 	if ps.inactive[auth] {
 		// accepted, stored where no GET will ever show it: like CT.

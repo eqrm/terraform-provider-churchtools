@@ -54,6 +54,56 @@ type PermissionWrite struct {
 	Type        string  `json:"type,omitempty"`
 }
 
+// OfferedAuthIDs is the set of authIds THIS host defines, read from its own
+// right table: POST /index.php?q=churchauth/ajax func=getMasterData, whose
+// data.auth_table is {module: {right: {id, …}}}. It is what ct-cli captures per
+// host (`ct permissions catalog --refresh`). A host lacking a module (eqrm-dev
+// has no churchreport and no jpmFlowManagerPreview) does not list that module's
+// rights at all, which is the only reliable tell: its PUT answers 204 and GET
+// never returns the row.
+//
+// Probed read-only 2026-10-19: eqrm-dev (CT 3.138.0-RC11, 223 rights) lists
+// neither 701, 702 nor 2080; eqrm (3.137.1, 187 rights) lists all three.
+//
+// The answer is cached per Client (one per provider instance). An error is
+// returned, never an empty set: callers must fail closed.
+func (c *Client) OfferedAuthIDs(ctx context.Context) (map[int64]bool, error) {
+	if c == nil {
+		return nil, fmt.Errorf("%w: churchauth/ajax getMasterData", ErrNotConfigured)
+	}
+	c.offeredMu.Lock()
+	defer c.offeredMu.Unlock()
+	if c.offered != nil {
+		return c.offered, nil
+	}
+	// Decoded strictly: an entry without a numeric id is an error, never a
+	// silently unoffered right. eqrm and eqrm-dev (probed 2026-10-19) list only
+	// objects with numeric ids.
+	var payload struct {
+		AuthTable map[string]map[string]struct {
+			ID json.Number `json:"id"`
+		} `json:"auth_table"`
+	}
+	if err := c.AjaxJSON(ctx, "churchauth", map[string]string{"func": "getMasterData"}, &payload); err != nil {
+		return nil, fmt.Errorf("right table of %s unreadable: %w", c.baseURL, err)
+	}
+	if len(payload.AuthTable) == 0 {
+		return nil, fmt.Errorf("churchtools: churchauth/ajax getMasterData on %s returned no auth_table", c.baseURL)
+	}
+	ids := map[int64]bool{}
+	for module, rights := range payload.AuthTable {
+		for name, r := range rights {
+			id, err := r.ID.Int64()
+			if err != nil {
+				return nil, fmt.Errorf("churchtools: auth_table %s:%s has no numeric id (%q)", module, name, r.ID.String())
+			}
+			ids[id] = true
+		}
+	}
+	c.offered = ids
+	return ids, nil
+}
+
 func permissionPath(domainType, domainID string) (string, error) {
 	if domainID == "" {
 		return "", fmt.Errorf("%w: /permissions/%s", ErrNoID, domainType)

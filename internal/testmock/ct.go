@@ -695,6 +695,14 @@ func (s *Server) handleLegacy(w http.ResponseWriter, r *http.Request) {
 				},
 			},
 		}
+		if s.perm != nil {
+			s.perm.authTableCalls++
+			if s.perm.authTableFails {
+				writeErr("getMasterData failed")
+				return
+			}
+			payload["auth_table"] = s.perm.authTable()
+		}
 		writeStatus(payload)
 	case "saveMasterData":
 		if r.Form.Get("table") == "cdb_privacy_policy_agreement_types" {
