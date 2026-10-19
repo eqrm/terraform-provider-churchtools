@@ -12,15 +12,31 @@ import (
 	"github.com/eqrm/terraform-provider-churchtools/internal/testmock"
 )
 
+// newTestClient builds a token-mode client against h. Token mode buys a session
+// first, so the handshake routes are answered here and h only sees REST calls,
+// each carrying the session cookie.
 func newTestClient(h http.Handler) (*Client, func()) {
-	srv := httptest.NewServer(h)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/whoami":
+			http.SetCookie(w, &http.Cookie{Name: "sid", Value: "s1"})
+			w.Write([]byte(`{"data":{"id":1}}`))
+		case "/api/csrftoken":
+			w.Write([]byte(`{"data":"csrf-1"}`))
+		default:
+			h.ServeHTTP(w, r)
+		}
+	}))
 	return New(srv.URL, "tok"), srv.Close
 }
 
 func TestList_UnwrapsDataEnvelope(t *testing.T) {
 	c, done := newTestClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "Login tok" {
-			t.Errorf("Authorization = %q, want %q", got, "Login tok")
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("Authorization = %q, want none: the token is spent once on the handshake", got)
+		}
+		if got := r.Header.Get("Cookie"); got != "sid=s1" {
+			t.Errorf("Cookie = %q, want sid=s1", got)
 		}
 		w.Write([]byte(`{"data":[{"id":0,"name":"Mainz"},{"id":7,"name":"Idstein"}]}`))
 	}))
