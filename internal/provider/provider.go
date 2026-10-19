@@ -157,6 +157,7 @@ func (p *churchtoolsProvider) Resources(_ context.Context) []func() resource.Res
 		NewGroupCategoryResource,
 		NewDBFieldResource,
 		NewGroupResource,
+		NewGroupRoleResource,
 	}
 }
 

@@ -26,6 +26,11 @@ category — plus `db_field`, which manages one setting of an existing data fiel
 `group` (name, group type, status and campus of a group; hierarchy, dynamic groups,
 member fields and grants will be separate resources).
 
+One tier-2 resource is in as a **spike**: `group_role`, the grants one role holds
+in one group, with `preserve_unknown` for partially managed grant lists. It is
+covered by unit tests and the mock only; see below before using it on a real
+instance.
+
 Nothing is ever deleted in ChurchTools. Every resource's `Delete` **un-manages**
 the object instead: it drops it from state, leaves it untouched in ChurchTools,
 and emits a warning that points the operator to the ChurchTools UI if it should
@@ -113,6 +118,64 @@ group back and fails with „ChurchTools hat
 die Änderung ignoriert“ if any of the four values differs from the plan, so a silent
 ignore is an error rather than drift. Delete only un-manages; CT's DELETE would 409 on
 references and destroy memberships.
+
+`group_role` (`/permissions/group_role/{pairingId}`, pairing resolved through
+`/groups/{id}/roles`) ran live on eqrm-dev on 2026-10-19 (sll_koblenz Mitglied,
+pairing 16829, [protocol and result in #26](https://github.com/eqrm/terraform-provider-churchtools/pull/26#issuecomment-6263338890)):
+create without writes, an undeclared grant on a preserved dimension stable over three
+plans, an undeclared unscoped right revoked alone, a declared selection row added and
+revoked by exact `dataId`. Measured there: a scoped PUT is additive and an exact-id
+DELETE removes only that row. **Not measured**: DELETE without `dataId` (the mock
+removes every selection row of the right), a selection PUT next to `-1` (the mock
+ignores it), and whether a DELETE also removes a `revoke` row of the same identity;
+these come from CT 3.137's OpenAPI text. Payload fixtures were captured read-only from
+eqrm-dev (`internal/provider/testdata/group_role/`). See
+[group_role](#group_role-and-preserve_unknown) for the semantics.
+
+## group_role and preserve_unknown
+
+`churchtools_group_role` holds every grant of one role in one group ("Rechte
+verwalten" at a group). It creates nothing: CT pairs every role of the group type
+with the group when the group is created, and the resource writes onto that
+pairing. Example: [`examples/resources/churchtools_group_role`](examples/resources/churchtools_group_role/resource.tf).
+
+- **One `grant` block per right**, with the ids in the argument for the right's
+  scope dimension (`groups`, `campuses`, `departments`, `security_levels`,
+  `group_types`, `comment_viewers`; every other dimension in `data_ids`). A block
+  without ids is the right's row without a selection, which for a scoped right is
+  *not* "all"; "all" is `["-1"]`. Rights are named as in ct-structure
+  (`module:name`), resolved through a catalog embedded from eqrm.church.tools
+  (CT 3.137.1).
+- **`applies_to_subgroups = true`** is CT's `isInherited`: the row applies in the
+  group's subgroups, not in the group itself. It is a separate grant from the
+  direct one; write both if both are meant. Leave it out rather than writing false.
+- **Undeclared grants are revoked**, like any Terraform list. Exceptions, never in
+  state and never revoked: deny rows (`type: revoke`), CT's own system rows
+  (`modifiedPid -1`), rights the catalog does not know (warned about), and
+  **undeclared grants on a dimension named in `preserve_unknown`**. Those last ones
+  are listed in the computed `preserved_grants`.
+- `preserve_unknown` takes CT scope-field names (`crp_query`, `cc_html_template`,
+  `cdb_gruppe`, …), as ct-structure's `preserveUnknown` does. Unscoped rights have
+  no dimension and are never preserved. A grant you *declare* on a preserved
+  dimension is owned: removing its block revokes it, by exact id.
+- An apply only ever revokes a row the plan showed (one in state). Adding a
+  dimension to `preserve_unknown` keeps the rows on it that the same plan showed as
+  removals; removing a dimension makes its undeclared rows appear as removals in
+  the *next* plan, never in the same apply.
+- Every write is read back. CT answers 204 to a grant it does not store (a right
+  of a module the instance lacks, such as eqrm-dev's churchreport 701/702 and
+  jpmFlowManagerPreview 2080, or a selection next to an existing `-1`), and the
+  apply fails instead of writing a state that lies.
+- `preserved_grants` is what the last refresh saw, written to state like any
+  attribute: a plain `plan` refreshes in memory and stores nothing, so a grant
+  added in the UI shows up there after the next `apply` (or `apply -refresh-only`).
+  A plan that changes grants keeps it as it is, unless the change can move rows in
+  or out of it (a changed `preserve_unknown`, or a block declaring a preserved row);
+  only then is it "known after apply".
+- `terraform destroy` un-manages and revokes nothing. To revoke, remove the blocks
+  and apply first.
+- Import id: `<group id>/<role name>`, or `<group id>/<role name>/<dim>,<dim>` to
+  carry `preserve_unknown` into the import so preserved rows never enter state.
 
 ## Authentication
 

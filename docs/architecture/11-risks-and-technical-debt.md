@@ -9,6 +9,6 @@
 | A tag can't be undone | A wrong schema is public. | Tag only on explicit decision; check for a parallel release. |
 | API churn | Each ChurchTools change can cost a provider release. | Small surface; field contracts taken from the OpenAPI spec. |
 | Release prerequisites (signing key, registry key, submission) are manual | Releases build but `tofu init` refuses them. | README "Releasing". |
-| Partially managed grant lists have no Terraform equivalent | Rights could vanish without a delete. | Gated on a spike in the consumer's design; not in this repo yet. |
+| Partially managed grant lists have no Terraform equivalent | Rights could vanish without a delete. | `group_role` keeps undeclared rows on `preserve_unknown` dimensions out of state, and an apply only revokes rows the plan showed. Mock- and fixture-tested; the live spike on eqrm-dev is still open. |
 
 Technical debt: the mock's verb table gates on method alone; `gofmt` isn't in CI.

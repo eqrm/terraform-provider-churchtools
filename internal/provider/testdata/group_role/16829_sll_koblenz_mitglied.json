@@ -1,0 +1,28 @@
+[
+ {
+  "domainType": "group_role",
+  "domainId": 16829,
+  "authId": 102,
+  "dataId": 2,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-08-14T09:07:03Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 16829,
+  "authId": 124,
+  "dataId": 24,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-08-14T09:07:03Z",
+   "modifiedPid": 1
+  }
+ }
+]

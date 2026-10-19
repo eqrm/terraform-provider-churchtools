@@ -1,0 +1,613 @@
+[
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 101,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T05:54:21Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 107,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T17:41:03Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 109,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T17:41:03Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 111,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T17:41:03Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 119,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T17:41:03Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 120,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T17:41:03Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 125,
+  "dataId": 1,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T05:54:21Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 125,
+  "dataId": 2,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T17:41:03Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 125,
+  "dataId": 3,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T17:41:04Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 1101,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T17:41:04Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 1103,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T17:41:04Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 1114,
+  "dataId": 1,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T17:41:04Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 1114,
+  "dataId": 2,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T17:41:04Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10101,
+  "dataId": 3,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T17:41:04Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10101,
+  "dataId": 3,
+  "isInherited": true,
+  "type": "grant",
+  "reason": "staging probe churchtools-connector#2331",
+  "meta": {
+   "modifiedDate": "2026-10-16T15:04:25Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10102,
+  "dataId": 1,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T17:41:04Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10102,
+  "dataId": 3,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-10-16T14:36:55Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10102,
+  "dataId": 3,
+  "isInherited": true,
+  "type": "grant",
+  "reason": "staging probe churchtools-connector#2331",
+  "meta": {
+   "modifiedDate": "2026-10-16T15:04:25Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10104,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-10-16T14:36:55Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10104,
+  "dataId": null,
+  "isInherited": true,
+  "type": "grant",
+  "reason": "staging probe churchtools-connector#2331",
+  "meta": {
+   "modifiedDate": "2026-10-16T15:04:25Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10106,
+  "dataId": 3,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T17:41:04Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10106,
+  "dataId": 3,
+  "isInherited": true,
+  "type": "grant",
+  "reason": "staging probe churchtools-connector#2331",
+  "meta": {
+   "modifiedDate": "2026-10-16T15:04:25Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10107,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-10-16T14:36:55Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10107,
+  "dataId": null,
+  "isInherited": true,
+  "type": "grant",
+  "reason": "staging probe churchtools-connector#2331",
+  "meta": {
+   "modifiedDate": "2026-10-16T15:04:25Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10108,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-10-16T14:36:55Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10108,
+  "dataId": null,
+  "isInherited": true,
+  "type": "grant",
+  "reason": "staging probe churchtools-connector#2331",
+  "meta": {
+   "modifiedDate": "2026-10-16T15:04:26Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10111,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-10-16T14:36:56Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10111,
+  "dataId": null,
+  "isInherited": true,
+  "type": "grant",
+  "reason": "staging probe churchtools-connector#2331",
+  "meta": {
+   "modifiedDate": "2026-10-16T15:04:26Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10112,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-10-16T14:36:56Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10112,
+  "dataId": null,
+  "isInherited": true,
+  "type": "grant",
+  "reason": "staging probe churchtools-connector#2331",
+  "meta": {
+   "modifiedDate": "2026-10-16T15:04:26Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10113,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-10-16T14:36:56Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10113,
+  "dataId": null,
+  "isInherited": true,
+  "type": "grant",
+  "reason": "staging probe churchtools-connector#2331",
+  "meta": {
+   "modifiedDate": "2026-10-16T15:04:26Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10117,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-10-16T14:36:56Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10117,
+  "dataId": null,
+  "isInherited": true,
+  "type": "grant",
+  "reason": "staging probe churchtools-connector#2331",
+  "meta": {
+   "modifiedDate": "2026-10-16T15:04:26Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10118,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-10-16T14:36:56Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10118,
+  "dataId": null,
+  "isInherited": true,
+  "type": "grant",
+  "reason": "staging probe churchtools-connector#2331",
+  "meta": {
+   "modifiedDate": "2026-10-16T15:04:26Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10119,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-10-16T14:36:56Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10119,
+  "dataId": null,
+  "isInherited": true,
+  "type": "grant",
+  "reason": "staging probe churchtools-connector#2331",
+  "meta": {
+   "modifiedDate": "2026-10-16T15:04:27Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10124,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-10-16T14:36:56Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10124,
+  "dataId": null,
+  "isInherited": true,
+  "type": "grant",
+  "reason": "staging probe churchtools-connector#2331",
+  "meta": {
+   "modifiedDate": "2026-10-16T15:04:27Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10126,
+  "dataId": 3,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T17:41:04Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10126,
+  "dataId": 3,
+  "isInherited": true,
+  "type": "grant",
+  "reason": "staging probe churchtools-connector#2331",
+  "meta": {
+   "modifiedDate": "2026-10-16T15:04:27Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10128,
+  "dataId": null,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-10-16T14:36:56Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10128,
+  "dataId": null,
+  "isInherited": true,
+  "type": "grant",
+  "reason": "staging probe churchtools-connector#2331",
+  "meta": {
+   "modifiedDate": "2026-10-16T15:04:27Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10132,
+  "dataId": 3,
+  "isInherited": false,
+  "type": "grant",
+  "reason": null,
+  "meta": {
+   "modifiedDate": "2026-07-12T17:41:04Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10132,
+  "dataId": 3,
+  "isInherited": true,
+  "type": "grant",
+  "reason": "staging probe churchtools-connector#2331",
+  "meta": {
+   "modifiedDate": "2026-10-16T15:04:27Z",
+   "modifiedPid": 1
+  }
+ },
+ {
+  "domainType": "group_role",
+  "domainId": 14853,
+  "authId": 10133,
+  "dataId": null,
+  "isInherited": true,
+  "type": "grant",
+  "reason": "staging probe churchtools-connector#2331",
+  "meta": {
+   "modifiedDate": "2026-10-16T15:04:27Z",
+   "modifiedPid": 1
+  }
+ }
+]
