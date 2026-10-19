@@ -119,6 +119,16 @@ die Änderung ignoriert“ if any of the four values differs from the plan, so a
 ignore is an error rather than drift. Delete only un-manages; CT's DELETE would 409 on
 references and destroy memberships.
 
+A `group_type_id` change is a migration: CT answers `PATCH groupTypeId` with
+`400 groupTypeId: validation.always.invalid`, so Update leaves the field out of the PATCH
+and calls `POST /groups/{id}/grouptype` with a `roleMapping` over every role of the old
+type (ids from `/group/roles`; the design and the live verification are ct-cli's,
+`src/engine/grouptype.ts`). A role maps to the same-named role of the new type, or, if
+nobody holds it in this group, to the new type's default role. A role that holds members
+and has no same-named target fails plan and apply with a German error naming it. **Not
+verified against a live instance from this provider**, and whether CT keeps a group's
+per-role grants (`churchtools_group_role`) across the migration is open.
+
 `group_role` (`/permissions/group_role/{pairingId}`, pairing resolved through
 `/groups/{id}/roles`) ran live on eqrm-dev on 2026-10-19 (sll_koblenz Mitglied,
 pairing 16829, [protocol and result in #26](https://github.com/eqrm/terraform-provider-churchtools/pull/26#issuecomment-6263338890)):

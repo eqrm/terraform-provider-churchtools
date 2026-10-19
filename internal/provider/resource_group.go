@@ -16,6 +16,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
+var _ resource.ResourceWithModifyPlan = (*groupResource)(nil)
+
 const groupCollection = "/groups"
 
 // A ChurchTools group (Gruppe, /groups) — the group itself, nothing around it.
@@ -71,8 +73,13 @@ func (r *groupResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 			},
 			"name": schema.StringAttribute{Required: true, Description: "Group name."},
 			"group_type_id": schema.StringAttribute{
-				Required:    true,
-				Description: "Id of the group type, e.g. churchtools_group_type.x.id.",
+				Required: true,
+				Description: "Id of the group type, e.g. churchtools_group_type.x.id. Changing it migrates the " +
+					"group (POST /groups/{id}/grouptype), because ChurchTools refuses the field on a plain update. " +
+					"Every role of the old type is mapped to the same-named role of the new one; a role without " +
+					"members and without a same-named target goes to the new type's default role. A role that " +
+					"holds members and has no same-named target stops plan and apply with an error, since the " +
+					"mapping decides where those memberships land.",
 			},
 			"group_status_id": schema.StringAttribute{
 				Required:    true,
@@ -214,8 +221,14 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	// PATCH only what changed: it leaves everything else on the group (and
 	// anything edited in the UI since the last refresh) alone.
 	body := client.Row{}
+	typeChanged := false
 	for _, f := range groupFields {
 		if f.get(plan).Equal(f.get(state)) {
+			continue
+		}
+		if f.key == "groupTypeId" {
+			// CT 400s groupTypeId on PATCH; the type moves through its own endpoint below.
+			typeChanged = true
 			continue
 		}
 		v, err := groupValue(f.key, f.attr, f.get(plan))
@@ -225,9 +238,24 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		}
 		body[f.key] = v
 	}
-	if _, err := r.client.Update(ctx, groupCollection, id, "PATCH", body); err != nil {
-		resp.Diagnostics.AddError("Gruppe konnte nicht aktualisiert werden", err.Error())
-		return
+	// The migration goes first and is fully planned (roles, members, mapping) before
+	// any write, so a refusal leaves the group untouched.
+	if typeChanged {
+		mig, err := r.planTypeChange(ctx, id, state.GroupTypeID, plan.GroupTypeID)
+		if err != nil {
+			resp.Diagnostics.AddError("Gruppentyp kann nicht gewechselt werden", err.Error())
+			return
+		}
+		if err := r.client.Post(ctx, groupCollection+"/"+id+"/grouptype", mig.body()); err != nil {
+			resp.Diagnostics.AddError("Gruppentyp konnte nicht gewechselt werden", err.Error())
+			return
+		}
+	}
+	if len(body) > 0 {
+		if _, err := r.client.Update(ctx, groupCollection, id, "PATCH", body); err != nil {
+			resp.Diagnostics.AddError("Gruppe konnte nicht aktualisiert werden", err.Error())
+			return
+		}
 	}
 
 	// Don't trust the PATCH reply (200 live, but its body is not the contract): read the
@@ -244,7 +272,7 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		if want := f.get(plan); !want.Equal(f.get(got)) {
 			resp.Diagnostics.AddError(
 				"ChurchTools hat die Änderung ignoriert",
-				fmt.Sprintf("PATCH %s/%s mit %s = %s wurde angenommen, die Gruppe steht danach aber auf "+
+				fmt.Sprintf("Die Änderung an %s/%s mit %s = %s wurde angenommen, die Gruppe steht danach aber auf "+
 					"%s. Prüfe in ChurchTools, ob dieses Feld für die Gruppe gesperrt ist, und passe die "+
 					"Konfiguration an den Wert an, der dort gilt.",
 					groupCollection, id, f.attr, groupDisplay(want), groupDisplay(f.get(got))))
@@ -254,6 +282,47 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, got)...)
+}
+
+// planTypeChange resolves the role mapping for a group_type_id change.
+func (r *groupResource) planTypeChange(ctx context.Context, id string, from, to types.String) (groupTypeMigration, error) {
+	fromID, err := groupWireID("group_type_id", from)
+	if err != nil {
+		return groupTypeMigration{}, err
+	}
+	toID, err := groupWireID("group_type_id", to)
+	if err != nil {
+		return groupTypeMigration{}, err
+	}
+	f, _ := fromID.(int64)
+	t, _ := toID.(int64)
+	return planGroupTypeMigration(ctx, r.client, id, f, t)
+}
+
+// ModifyPlan refuses a group type change that cannot apply (a role with members and
+// no same-named role in the target type) already at plan time, so the plan does not
+// look applicable. It stays quiet while the provider is unconfigured or either type
+// id is still unknown (a group type created in the same run); Update repeats the
+// check before its first write.
+func (r *groupResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if r.client == nil || req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+	var plan, state groupModel
+	if resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...); resp.Diagnostics.HasError() {
+		return
+	}
+	if resp.Diagnostics.Append(req.State.Get(ctx, &state)...); resp.Diagnostics.HasError() {
+		return
+	}
+	if plan.ID.IsUnknown() || state.ID.IsNull() ||
+		plan.GroupTypeID.IsUnknown() || plan.GroupTypeID.IsNull() || state.GroupTypeID.IsNull() ||
+		plan.GroupTypeID.Equal(state.GroupTypeID) {
+		return
+	}
+	if _, err := r.planTypeChange(ctx, state.ID.ValueString(), state.GroupTypeID, plan.GroupTypeID); err != nil {
+		resp.Diagnostics.AddAttributeError(path.Root("group_type_id"), "Gruppentyp kann nicht gewechselt werden", err.Error())
+	}
 }
 
 func groupDisplay(v types.String) string {
