@@ -270,6 +270,37 @@ func TestPlanGrantWritesGuards(t *testing.T) {
 			t.Fatalf("%v %+v", err, w.Deletes)
 		}
 	})
+	t.Run("-1 narrowed to an id: delete -1, then put", func(t *testing.T) {
+		rows := []client.PermissionRow{live(viewAlldata, i64(-1), false)}
+		all := grantRow{AuthID: viewAlldata, HasData: true, DataID: -1}
+		two := grantRow{AuthID: viewAlldata, HasData: true, DataID: 2}
+		w, err := planGrantWrites([]grantRow{all}, []grantRow{two}, rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantDel := []client.PermissionWrite{{AuthID: viewAlldata, DataID: []int64{-1}}}
+		wantPut := []client.PermissionWrite{{AuthID: viewAlldata, DataID: []int64{2}, Type: "grant"}}
+		if !reflect.DeepEqual(w.Deletes, wantDel) || !reflect.DeepEqual(w.Puts, wantPut) {
+			t.Fatalf("%+v %+v", w.Deletes, w.Puts)
+		}
+	})
+	t.Run("null row and its id rows removed together", func(t *testing.T) {
+		rows := []client.PermissionRow{live(viewAlldata, nil, false), live(viewAlldata, i64(5), false)}
+		prior := []grantRow{{AuthID: viewAlldata}, {AuthID: viewAlldata, HasData: true, DataID: 5}}
+		w, err := planGrantWrites(prior, nil, rows)
+		want := []client.PermissionWrite{{AuthID: viewAlldata, DataID: []int64{5}}, {AuthID: viewAlldata}}
+		if err != nil || !reflect.DeepEqual(w.Deletes, want) {
+			t.Fatalf("%v %+v", err, w.Deletes)
+		}
+	})
+	t.Run("null row next to a kept id row is refused", func(t *testing.T) {
+		rows := []client.PermissionRow{live(viewAlldata, nil, false), live(viewAlldata, i64(5), false)}
+		prior := []grantRow{{AuthID: viewAlldata}, {AuthID: viewAlldata, HasData: true, DataID: 5}}
+		_, err := planGrantWrites(prior, prior[1:], rows)
+		if err == nil || !strings.Contains(err.Error(), "einzeln") {
+			t.Fatal(err)
+		}
+	})
 	t.Run("gone already: nothing sent", func(t *testing.T) {
 		w, err := planGrantWrites([]grantRow{{AuthID: adminTmpl}}, nil, nil)
 		if err != nil || len(w.Deletes) != 0 {
@@ -290,5 +321,10 @@ func TestVerifyGrantWrites(t *testing.T) {
 	}
 	if err := verifyGrantWrites([]grantRow{{AuthID: viewAlldata, HasData: true, DataID: 2}}, nil, fixture(t, "16829_sll_koblenz_mitglied")); err != nil {
 		t.Fatal(err)
+	} // A declared baseline row dropped from config is left in CT on purpose
+	// (planGrantWrites skips it), so the read-back must not call it stuck.
+	row := baseline(live(seePersons, i64(1), false))
+	if err := verifyGrantWrites(nil, []grantRow{rowOf(row)}, []client.PermissionRow{row}); err != nil {
+		t.Fatalf("baseline reported as stuck: %v", err)
 	}
 }

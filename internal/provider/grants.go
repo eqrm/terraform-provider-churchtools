@@ -20,6 +20,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -323,6 +324,7 @@ func planGrantWrites(prior, desired []grantRow, live []client.PermissionRow) (gr
 	// Deletes.
 	delIDs := map[writeKey][]int64{}
 	var delNull []writeKey
+	var nullRows []grantRow
 	for _, p := range prior {
 		if want[p] {
 			continue
@@ -336,9 +338,20 @@ func planGrantWrites(prior, desired []grantRow, live []client.PermissionRow) (gr
 			delIDs[k] = append(delIDs[k], p.DataID)
 			continue
 		}
-		// DELETE without dataId removes every selection row of this key too, so it
-		// is only safe when the null row is the key's only row.
-		if others := liveData[k]; len(others) > 0 {
+		nullRows = append(nullRows, p)
+	}
+	// DELETE without dataId removes every selection row of this key too, so it
+	// is only safe when the key keeps no selection row once this apply's id
+	// deletes (sent first) have run.
+	for _, p := range nullRows {
+		k := writeKey{p.AuthID, p.Subgroups}
+		var others []grantRow
+		for _, o := range liveData[k] {
+			if !slices.Contains(delIDs[k], o.DataID) {
+				others = append(others, o)
+			}
+		}
+		if len(others) > 0 {
 			return w, fmt.Errorf("%s kann nicht einzeln entzogen werden: ChurchTools löscht mit dieser "+
 				"Zeile auch %d Auswahl-Zeile(n) desselben Rechts (z. B. %s). Entziehe sie in der "+
 				"ChurchTools-Oberfläche", p, len(others), others[0])
@@ -378,7 +391,14 @@ func planGrantWrites(prior, desired []grantRow, live []client.PermissionRow) (gr
 		// CT ignores a non-empty PUT entirely while a -1 ("alle") row exists for
 		// the key (OpenAPI, PUT /permissions/…). Say so instead of failing later
 		// on the read-back.
-		if _, all := liveGrant[grantRow{AuthID: k.AuthID, HasData: true, DataID: -1, Subgroups: k.Subgroups}]; all {
+		// A -1 this apply deletes first does not count.
+		all := grantRow{AuthID: k.AuthID, HasData: true, DataID: -1, Subgroups: k.Subgroups}
+		if _, allLive := liveGrant[all]; allLive && !slices.Contains(delIDs[k], -1) {
+			if want[all] {
+				return w, fmt.Errorf("%s: die Auswahl -1 (alle) und einzelne Auswahlen schließen sich aus, "+
+					"ChurchTools ignoriert neben -1 jede weitere. Deklariere nur eines von beiden",
+					grantRow{AuthID: k.AuthID, Subgroups: k.Subgroups})
+			}
 			return w, fmt.Errorf("%s hat in ChurchTools bereits die Auswahl -1 (alle); ChurchTools "+
 				"ignoriert dann jede weitere Auswahl. Nimm -1 in die Konfiguration auf oder entferne es zuerst",
 				grantRow{AuthID: k.AuthID, Subgroups: k.Subgroups})
@@ -399,9 +419,11 @@ func planGrantWrites(prior, desired []grantRow, live []client.PermissionRow) (gr
 // or a selection next to an existing -1 — so a 2xx proves nothing.
 func verifyGrantWrites(desired, removed []grantRow, live []client.PermissionRow) error {
 	liveGrant := map[grantRow]bool{}
+	baseline := map[grantRow]bool{}
 	for _, lr := range live {
 		if lr.Type == "grant" {
 			liveGrant[rowOf(lr)] = true
+			baseline[rowOf(lr)] = lr.IsSystemBaseline()
 		}
 	}
 	var missing, stuck []string
@@ -411,7 +433,8 @@ func verifyGrantWrites(desired, removed []grantRow, live []client.PermissionRow)
 		}
 	}
 	for _, r := range removed {
-		if liveGrant[r] {
+		// planGrantWrites leaves CT's baseline rows alone on purpose.
+		if liveGrant[r] && !baseline[r] {
 			stuck = append(stuck, r.String())
 		}
 	}
