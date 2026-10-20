@@ -241,7 +241,18 @@ type ReadResult struct {
 //   - deny rows (type "revoke"): an admin's explicit deny is never owned, as in
 //     ct-cli's diffGrants;
 //   - CT's system baseline (modifiedPid -1), unless it was declared: CT re-adds
-//     those itself, and a declared one counts as satisfied (ct-cli #114);
+//     those itself, and a declared one counts as satisfied (ct-cli #114).
+//     Satisfied means: a declared row (same authId, dataId, isInherited) that
+//     is live as a system row goes into state as declared, PlanWrites sends no
+//     PUT for it, and no plan shows a diff. A declared row that is absent is
+//     written as usual. A system row is never revoked: dropping it from config
+//     only takes it out of state (and warns, see RetainedBaseline).
+//     `declared` is what makes this work across import: import reads with
+//     declared == nil, so undeclared system rows stay out of state (else the
+//     next plan would try to revoke them). When config declares one afterwards,
+//     the first plan after import shows it as an addition; the apply finds it
+//     live, writes nothing, and puts it into state. Later reads keep it, because
+//     it is then declared;
 //   - authIds missing from the catalog;
 //   - rows on a preserve_unknown dimension that were not declared.
 //
@@ -485,6 +496,26 @@ func SplitUnoffered(rows []Row, offered map[int64]bool) (keep, skipped []Row) {
 		}
 	}
 	return keep, skipped
+}
+
+// RetainedBaseline are the rows of prior that the apply meant to revoke
+// (absent from desired) but that are CT's system baseline (modifiedPid -1).
+// The provider never revokes those; the caller warns so that dropping a declared
+// system row from config is not mistaken for a revoke.
+func RetainedBaseline(prior, desired []Row, live []client.PermissionRow) []Row {
+	sys := map[Row]bool{}
+	for _, lr := range live {
+		if lr.Type == "grant" && lr.IsSystemBaseline() {
+			sys[RowOf(lr)] = true
+		}
+	}
+	var out []Row
+	for _, r := range RemovedRows(prior, desired) {
+		if sys[r] {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // RemovedRows is prior minus desired: what an apply meant to revoke.

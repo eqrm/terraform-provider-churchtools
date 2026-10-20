@@ -328,3 +328,38 @@ func TestVerifyGrantWrites(t *testing.T) {
 		t.Fatalf("baseline reported as stuck: %v", err)
 	}
 }
+
+func TestSystemRowSatisfiesDeclared(t *testing.T) {
+	sys := baseline(live(seePersons, i64(1), false))
+	row := RowOf(sys)
+	liveRows := []client.PermissionRow{sys}
+	// declared + system row: managed (into state), no write.
+	res := FilterLive(liveRows, RowSet([]Row{row}), nil)
+	if len(res.Managed) != 1 {
+		t.Fatalf("declared system row not managed: %+v", res)
+	}
+	w, err := PlanWrites(nil, []Row{row}, liveRows)
+	if err != nil || len(w.Puts) != 0 || len(w.Deletes) != 0 {
+		t.Fatalf("%v %+v", err, w)
+	}
+	// undeclared (import): left out.
+	if res := FilterLive(liveRows, nil, nil); len(res.Managed) != 0 {
+		t.Fatalf("undeclared system row in state: %+v", res)
+	}
+	// declared + absent: PUT.
+	other := Row{AuthID: seePersons, HasData: true, DataID: 2}
+	if w, _ := PlanWrites(nil, []Row{row, other}, liveRows); len(w.Puts) != 1 {
+		t.Fatalf("%+v", w)
+	}
+	// dropped from config: never deleted, reported as retained.
+	w, _ = PlanWrites([]Row{row}, nil, liveRows)
+	if len(w.Deletes) != 0 {
+		t.Fatalf("%+v", w)
+	}
+	if got := RetainedBaseline([]Row{row}, nil, liveRows); len(got) != 1 {
+		t.Fatalf("%v", got)
+	}
+	if got := RetainedBaseline([]Row{row}, []Row{row}, liveRows); len(got) != 0 {
+		t.Fatalf("%v", got)
+	}
+}
