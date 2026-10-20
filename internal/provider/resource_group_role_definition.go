@@ -418,9 +418,8 @@ func (r *groupRoleDefinitionResource) Delete(ctx context.Context, req resource.D
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	resp.Diagnostics.AddWarning("Rolle nur aus dem State entfernt",
-		"Rolle "+state.ID.ValueString()+" ("+state.Name.ValueString()+") wurde nur aus dem Terraform-State "+
-			"entfernt und besteht in ChurchTools weiter. Gelöscht wird sie von Hand in der ChurchTools-Oberfläche.")
+	resp.Diagnostics.AddWarning(orphanOnDeleteSummary, orphanOnDeleteDetail("Gruppenrollen")+
+		" Rolle "+state.ID.ValueString()+" ("+state.Name.ValueString()+").")
 }
 
 func (r *groupRoleDefinitionResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {

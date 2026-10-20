@@ -38,9 +38,10 @@ itself, `/group/roles`), `group_type_role` (its type-level grants,
 permission domain). Their basic write paths ran live on dev once; see below.
 Dynamic groups follow in a later change.
 
-Nothing is ever deleted in ChurchTools. Every resource's `Delete` **un-manages** the object instead: it drops it from state,
-leaves it untouched in ChurchTools, and emits a warning that points the operator
-to the ChurchTools UI if it should really go.
+Nothing is ever deleted in ChurchTools. Every resource's `Delete`
+**un-manages** the object instead: it drops it from state, leaves it untouched
+in ChurchTools, and emits a warning that points the operator to the ChurchTools
+UI if it should really go.
 
 ## Install
 
