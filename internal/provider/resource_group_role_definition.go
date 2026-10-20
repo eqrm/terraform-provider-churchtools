@@ -29,9 +29,8 @@ import (
 //     membership and all references by id are gone or dangling. The one
 //     attribute that would force a replacement, group_type_id, is a plan-time
 //     error instead; CT does not move a role between types either.
-//   - it really deletes (unlike the other resources, which only un-manage), but
-//     CT refuses with 409 while anything references the role. Set
-//     `lifecycle { prevent_destroy = true }` anyway.
+//   - Delete only un-manages, like the other resources: the role is dropped from
+//     state with a warning and never deleted in CT (see Delete).
 //   - PUT is not partial: Update reads the live role, overlays the planned
 //     values and sends the whole object, so shorty and growPathId that this
 //     configuration does not manage survive.
@@ -89,8 +88,8 @@ func (r *groupRoleDefinitionResource) Schema(_ context.Context, _ resource.Schem
 	resp.Schema = schema.Schema{
 		Description: "Eine Rolle eines Gruppentyps (z. B. Mitglied, Leiter). Ihre id ist auch die Domäne der Rechte " +
 			"auf Typebene (churchtools_group_type_role). Rollen werden nie ersetzt (group_type_id ist " +
-			"unveränderlich); Destroy löscht wirklich, ChurchTools antwortet 409, solange noch Mitgliedschaften auf " +
-			"die Rolle zeigen. Setze `lifecycle { prevent_destroy = true }`.",
+			"unveränderlich). Destroy entfernt die Rolle nur aus dem Terraform-State und löscht sie nicht in " +
+			"ChurchTools (Warnung); gelöscht wird sie von Hand in der ChurchTools-Oberfläche.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:      true,
@@ -410,35 +409,17 @@ func (r *groupRoleDefinitionResource) Update(ctx context.Context, req resource.U
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
-// Delete really deletes the role in ChurchTools. CT protects it: DELETE answers
-// 409 with a report while memberships (archived ones too) or other rows still
-// reference the role, and 400 for the last default role of a type. Both are
-// shown as they are; nothing is retried or forced.
+// Delete only drops the role from Terraform state; it never calls ChurchTools.
+// A role is referenced by memberships, type-level grants and rulesets by id, so
+// deleting it is done by hand in the ChurchTools UI (decision eqrm/ct-structure#116).
 func (r *groupRoleDefinitionResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
-	if notConfigured(r.client, &resp.Diagnostics) {
-		return
-	}
 	var state groupRoleDefinitionModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	err := r.client.DeleteGroupRole(ctx, state.ID.ValueString())
-	if se, ok := client.IsStatus(err, 409); ok {
-		detail := "ChurchTools verweigert das Löschen (409): Die Rolle wird noch verwendet, meist von " +
-			"Mitgliedschaften (auch archivierten)."
-		if b := se.DeletionBlockers(); len(b) > 0 {
-			detail += " Bericht: " + strings.Join(b, " ")
-		}
-		detail += " Entferne oder verschiebe zuerst die Mitglieder in ChurchTools. Soll die Rolle bestehen bleiben " +
-			"und nur nicht mehr verwaltet werden, nimm sie mit `tofu state rm` aus dem State. Rolle " +
-			state.ID.ValueString() + " (" + state.Name.ValueString() + ") wurde nicht gelöscht."
-		resp.Diagnostics.AddError("Rolle kann nicht gelöscht werden", detail)
-		return
-	}
-	if err != nil {
-		resp.Diagnostics.AddError("Rolle konnte nicht gelöscht werden", err.Error())
-	}
+	resp.Diagnostics.AddWarning(orphanOnDeleteSummary, orphanOnDeleteDetail("Gruppenrollen")+
+		" Rolle "+state.ID.ValueString()+" ("+state.Name.ValueString()+").")
 }
 
 func (r *groupRoleDefinitionResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {

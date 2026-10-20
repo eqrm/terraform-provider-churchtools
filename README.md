@@ -38,11 +38,10 @@ itself, `/group/roles`), `group_type_role` (its type-level grants,
 permission domain). Their basic write paths ran live on dev once; see below.
 Dynamic groups follow in a later change.
 
-Nothing is ever deleted in ChurchTools, with one exception:
-`group_role_definition` really deletes the role (see below). Every other
-resource's `Delete` **un-manages** the object instead: it drops it from state,
-leaves it untouched in ChurchTools, and emits a warning that points the operator
-to the ChurchTools UI if it should really go.
+Nothing is ever deleted in ChurchTools. Every resource's `Delete`
+**un-manages** the object instead: it drops it from state, leaves it untouched
+in ChurchTools, and emits a warning that points the operator to the ChurchTools
+UI if it should really go.
 
 ## Install
 
@@ -233,9 +232,8 @@ pairing. Example: [`examples/resources/churchtools_group_role`](examples/resourc
   not partial and `nameTranslated` is read-only, so an update reads the live row,
   overlays the planned values and sends the full object; `growPathId` is passed
   through, never written. `group_type_id` cannot change: a change is a plan error,
-  not a replacement. **Destroy deletes the role.** CT answers 409 while memberships
-  reference it; the apply fails with CT's deletion report, and the way out is
-  `tofu state rm`. Put `lifecycle { prevent_destroy = true }` on it.
+  not a replacement. Destroy un-manages: the role is dropped from state with a
+  warning and stays in ChurchTools; delete it by hand in the UI (ct-structure#116).
 - `churchtools_group_type_role` (`/permissions/group_type_role/{roleId}`, import id
   = role id) has the same `grant` block, `applies_to_subgroups`, `preserve_unknown`
   and `preserved_grants` as `group_role`. CT never accepts `type: revoke` on this
@@ -251,7 +249,7 @@ behaviour. On 2026-10-20 all three ran live on eqrm-dev from this provider:
 
 - `group_role_definition`: create (role 295 in group type 57), rename through
   `PUT /group/roles/{id}` with an empty follow-up plan and the unmanaged
-  `shorty`/`sort_key` kept, and destroy, after which CT answers 404 for the role.
+  `shorty`/`sort_key` kept, and a destroy that deleted the role (before the 2026-10-20 change to un-manage).
 - `group_type_role`: one grant written on the new role, then removed through the
   DELETE path; CT's row list was empty afterwards.
 - `person_status_grants`: import of status 0 (`Unbekannt`) put only the one
