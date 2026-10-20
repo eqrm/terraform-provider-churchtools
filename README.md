@@ -35,7 +35,7 @@ Tier 3, part 1 adds three more, on the same grants engine (`internal/grants`,
 shared with `group_role`): `group_role_definition` (the role of a group type
 itself, `/group/roles`), `group_type_role` (its type-level grants,
 `/permissions/group_type_role/{roleId}`) and `person_status_grants` (the `status`
-permission domain). They are tested against the mock only; see below.
+permission domain). Their basic write paths ran live on dev once; see below.
 Dynamic groups follow in a later change.
 
 Nothing is ever deleted in ChurchTools, with one exception:
@@ -222,14 +222,24 @@ pairing. Example: [`examples/resources/churchtools_group_role`](examples/resourc
   Destroy un-manages.
 
 The mock models these domains from CT 3.137's OpenAPI text and from ct-cli's
-behaviour. `group_role_definition`, `group_type_role` and `person_status_grants`
-are **mock-only, not verified live**. Open points:
+behaviour. On 2026-10-20 all three ran live on eqrm-dev from this provider:
 
-- `group_type_role`: whether dev accepts `isInherited` on write.
-- `group_role_definition`: the shape of the 409 report of a real role delete, and
-  `PUT /group/roles/{id}`, which the OpenAPI says answers 204 with no body (the
-  mock does the same; the client ignores the body either way).
-- `person_status_grants`: how the `status` domain handles scope.
+- `group_role_definition`: create (role 295 in group type 57), rename through
+  `PUT /group/roles/{id}` with an empty follow-up plan and the unmanaged
+  `shorty`/`sort_key` kept, and destroy, after which CT answers 404 for the role.
+- `group_type_role`: one grant written on the new role, then removed through the
+  DELETE path; CT's row list was empty afterwards.
+- `person_status_grants`: import of status 0 (`Unbekannt`) put only the one
+  hand-written row into state and left CT's baseline rows out; a `churchdb:view`
+  grant was added and removed again, and the status ended with its original rows.
+
+Still **not verified live**:
+
+- `group_type_role`: whether dev accepts `isInherited` on write, and data-scoped
+  grants (the live run used a right without scope).
+- `group_role_definition`: the shape of the 409 report when memberships still
+  reference the role.
+- `person_status_grants`: data-scoped grants on the `status` domain.
 
 Run a read-only import and an empty plan on dev first.
 
