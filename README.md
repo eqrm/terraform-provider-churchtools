@@ -244,6 +244,18 @@ pairing. Example: [`examples/resources/churchtools_group_role`](examples/resourc
   status id) has no `applies_to_subgroups` and only takes authIds below 10000.
   Destroy un-manages.
 
+- **System baseline rows** (`meta.modifiedPid` -1; prod has 97 on `group_type_role`
+  domains, dev holds 70 of them as ordinary rows) follow one rule in the shared
+  grants engine, for `group_role`, `group_type_role` and `person_status_grants`: a
+  declared row with the same identity (authId, dataId, isInherited) is *satisfied* by
+  a live system row, so there is no write and no diff, and read puts it into state as
+  declared. An undeclared system row is ignored and never revoked. A declared row that
+  is absent is written (PUT). The provider never revokes a system row: dropping a
+  declared one from config removes it from state only, with a warning. Import reads
+  without the config, so undeclared system rows stay out of state (otherwise the next
+  plan would revoke them); a block declaring one afterwards shows once as an addition
+  and is adopted without a write. Mock-verified only; the mock serves `modifiedPid` -1.
+
 The mock models these domains from CT 3.137's OpenAPI text and from ct-cli's
 behaviour. On 2026-10-20 all three ran live on eqrm-dev from this provider:
 

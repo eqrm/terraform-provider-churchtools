@@ -119,7 +119,12 @@ func grantBlock(kind grantsKind) schema.SetNestedBlock {
 	}
 	return schema.SetNestedBlock{
 		Description: "One right. Without a scope argument it is the right's row without a data " +
-			"selection; with one, one row per id.",
+			"selection; with one, one row per id. A row ChurchTools itself owns (system baseline, " +
+			"`meta.modifiedPid` -1) counts as satisfying a declared grant with the same right, selection and " +
+			"`applies_to_subgroups`: no write, no diff. Undeclared system rows are ignored. The provider never " +
+			"revokes a system row; dropping its block only takes it out of state (with a warning). After an " +
+			"import, which leaves undeclared system rows out of state, a block declaring one shows once as an " +
+			"addition and is adopted without a write.",
 		NestedObject: schema.NestedBlockObject{Attributes: attrs},
 	}
 }
@@ -618,6 +623,13 @@ func (s grantsService) update(ctx context.Context, id, label, summary string, pl
 		return false
 	}
 	s.warnSkipped(diags, label, skipped)
+	if kept := grants.RetainedBaseline(prior, desired, after); len(kept) > 0 {
+		grants.SortRows(kept)
+		diags.AddWarning("System-Rechte nicht entzogen",
+			fmt.Sprintf("%s: diese Rechte sind ChurchTools-Systemzeilen (modifiedPid -1) und stehen nicht mehr "+
+				"in der Konfiguration. Der Provider entzieht Systemzeilen nie; sie bleiben in ChurchTools "+
+				"bestehen und verschwinden nur aus dem State: %s.", label, grants.RowList(kept)))
+	}
 	res := grants.FilterLive(after, grants.RowSet(desired), preserveDims(plan.Preserve))
 	// A known planned value came from preservedGrantsModifier and must be
 	// returned as planned; it can only differ when the UI changed the domain

@@ -21,7 +21,9 @@ import (
 //     (eqrm-dev: 701/702/2080);
 //   - every write answers 204 with no body; a missing row deletes fine.
 
-// PermRow is one stored row, in CT's wire shape.
+// PermRow is one stored row, in CT's wire shape. ModifiedPid -1 is a ChurchTools
+// system baseline row (what prod has on group_type_role: the built-in churchdb:+…
+// and churchgroup:view rows); the mock serves it like any other row.
 type PermRow struct {
 	AuthID      int64  `json:"authId"`
 	DataID      *int64 `json:"dataId"`
@@ -158,6 +160,13 @@ func (s *Server) PermissionWrites() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.perms().writes...)
+}
+
+// ClearPermissionWrites forgets the recorded writes.
+func (s *Server) ClearPermissionWrites() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.perms().writes = nil
 }
 
 // SetInactiveAuthIDs makes PUTs for these authIds answer 204 without storing,
