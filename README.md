@@ -133,9 +133,16 @@ and calls `POST /groups/{id}/grouptype` with a `roleMapping` over every role of 
 type (ids from `/group/roles`; the design and the live verification are ct-cli's,
 `src/engine/grouptype.ts`). A role maps to the same-named role of the new type, or, if
 nobody holds it in this group, to the new type's default role. A role that holds members
-and has no same-named target fails plan and apply with a German error naming it. The members read asks for all four `group_member_statuses[]` (active, requested, to_delete, waiting) explicitly; eqrm-dev's default listing includes `to_delete`, but `requested` and `waiting` have not been verified live. A same-name match that turns a leader role into a participant role (or back) is kept but marked in the plan warning. **Not
-verified against a live instance from this provider**, and whether CT keeps a group's
-per-role grants (`churchtools_group_role`) across the migration is open.
+and has no same-named target fails plan and apply with a German error naming it. The
+members read asks for all four `group_member_statuses[]` (active, requested, to_delete,
+waiting) explicitly; eqrm-dev's default listing includes `to_delete`, but `requested` and
+`waiting` have not been verified live. A same-name match that turns a leader role into a
+participant role (or back) is kept but marked in the plan warning. Ran live on eqrm-dev
+on 2026-10-20 from this provider: an empty probe group (2041) went from type 5 (Team) to
+21 (Local Lead) and back, both `POST /grouptype` calls were accepted, the follow-up plan
+was empty and the plan warning listed the mapping. **Not verified live:** a migration
+with members in the group, and whether CT keeps a group's per-role grants
+(`churchtools_group_role`) across it.
 
 `group_role` (`/permissions/group_role/{pairingId}`, pairing resolved through
 `/groups/{id}/roles`) ran live on eqrm-dev on 2026-10-19 (sll_koblenz Mitglied,
