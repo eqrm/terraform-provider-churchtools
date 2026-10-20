@@ -251,6 +251,10 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 			return
 		}
 	}
+	// Once the migration POST succeeded, the group's type is the planned one whatever
+	// happens next; every later error path must record that, not the stale state.
+	migrated := state
+	migrated.GroupTypeID = plan.GroupTypeID
 	if len(body) > 0 {
 		if _, err := r.client.Update(ctx, groupCollection, id, "PATCH", body); err != nil {
 			resp.Diagnostics.AddError("Gruppe konnte nicht aktualisiert werden", err.Error())
@@ -271,6 +275,9 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	after, err := r.client.Get(ctx, groupCollection, id)
 	if err != nil {
 		resp.Diagnostics.AddError("Gruppe konnte nach dem Speichern nicht gelesen werden", err.Error())
+		if typeChanged {
+			resp.Diagnostics.Append(resp.State.Set(ctx, migrated)...)
+		}
 		return
 	}
 	got := groupFromRow(id, after)
@@ -285,6 +292,11 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		}
 	}
 	if resp.Diagnostics.HasError() {
+		if typeChanged {
+			// The migration landed; keep the state on what CT holds, so the next plan
+			// shows only the field CT ignored.
+			resp.Diagnostics.Append(resp.State.Set(ctx, got)...)
+		}
 		return
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, got)...)
@@ -300,8 +312,16 @@ func (r *groupResource) planTypeChange(ctx context.Context, id string, from, to 
 	if err != nil {
 		return groupTypeMigration{}, err
 	}
-	f, _ := fromID.(int64)
-	t, _ := toID.(int64)
+	f, ok := fromID.(int64)
+	if !ok {
+		return groupTypeMigration{}, fmt.Errorf("Der bisherige group_type_id der Gruppe %s ist nicht gesetzt (%s), "+
+			"etwa nach einem Import ohne Gruppentyp. Ohne ihn lässt sich kein Rollen-Mapping ableiten.", id, groupDisplay(from))
+	}
+	t, ok := toID.(int64)
+	if !ok {
+		return groupTypeMigration{}, fmt.Errorf("Der neue group_type_id der Gruppe %s ist nicht gesetzt (%s). "+
+			"Ohne ihn lässt sich kein Rollen-Mapping ableiten.", id, groupDisplay(to))
+	}
 	return planGroupTypeMigration(ctx, r.client, id, f, t)
 }
 

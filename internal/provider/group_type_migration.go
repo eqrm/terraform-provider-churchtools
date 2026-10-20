@@ -129,6 +129,13 @@ func (m groupTypeMigration) body() client.Row {
 	return client.Row{"groupTypeId": m.toTypeID, "roleMapping": mapping}
 }
 
+// memberStatusQuery asks for every membership status. CT's OpenAPI takes
+// group_member_statuses[] (active, requested, to_delete, waiting); eqrm-dev's default
+// listing includes to_delete, but requested and waiting are unverified, and a role held
+// only by such members must not look empty.
+const memberStatusQuery = "?group_member_statuses[]=active&group_member_statuses[]=requested" +
+	"&group_member_statuses[]=to_delete&group_member_statuses[]=waiting"
+
 // planGroupTypeMigration reads the roles of both types and the group's members
 // (every page: a role whose holders all sit past page 1 would count as empty and be
 // mapped away without asking) and derives the mapping. The error is German and
@@ -148,7 +155,7 @@ func planGroupTypeMigration(ctx context.Context, c *client.Client, groupID strin
 			targets = append(targets, r)
 		}
 	}
-	memberRows, err := c.List(ctx, groupCollection+"/"+groupID+"/members")
+	memberRows, err := c.List(ctx, groupCollection+"/"+groupID+"/members"+memberStatusQuery)
 	if err != nil {
 		return groupTypeMigration{}, fmt.Errorf("Mitglieder der Gruppe %s konnten nicht gelesen werden: %w", groupID, err)
 	}
@@ -205,7 +212,11 @@ func planGroupTypeMigration(ctx context.Context, c *client.Client, groupID strin
 func (m groupTypeMigration) describe() string {
 	var lines []string
 	for _, mv := range m.moves {
-		lines = append(lines, fmt.Sprintf("%q -> %q (reason: %s)", mv.from.name, mv.to.name, mv.reason))
+		line := fmt.Sprintf("%q -> %q (reason: %s)", mv.from.name, mv.to.name, mv.reason)
+		if mv.from.kind != mv.to.kind {
+			line += fmt.Sprintf(" (Art wechselt: %s -> %s)", mv.from.kind, mv.to.kind)
+		}
+		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
 }

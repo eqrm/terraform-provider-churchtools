@@ -44,8 +44,9 @@ type Server struct {
 	// perm holds the permission routes' state (permissions.go).
 	perm *permState
 	// members and lastTypePost back the group type migration routes (grouptype.go).
-	members      map[string][]int
-	lastTypePost map[string]map[string]any
+	members         map[string][]int
+	lastTypePost    map[string]map[string]any
+	membersStatuses map[string][]string
 }
 
 func New() *Server {

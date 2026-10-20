@@ -369,3 +369,33 @@ func TestAccGroup_TypeMigrationCountsMembersOnLaterPages(t *testing.T) {
 		},
 	})
 }
+
+// The migration lands, then CT ignores the rename in the same apply: the verify loop
+// errors, but state must hold the new type (not the stale one), so the next plan
+// shows only the ignored field.
+func TestAccGroup_TypeMigrationKeepsNewTypeWhenVerifyFails(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedTypeMigration(mock, map[int]map[string]any{
+		201: {"name": "Leiter", "type": "leader", "default": false},
+		202: {"name": "Mitglied", "type": "participant", "default": true},
+		203: {"name": "Gast", "type": "participant", "default": false},
+	})
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: groupTypeConfig(mock.URL, "Gruppe 010", "11")},
+			{
+				PreConfig:   func() { mock.IgnoreOnPatch("/groups", 5001, "name") },
+				Config:      groupTypeConfig(mock.URL, "Gruppe 010 neu", "12"),
+				ExpectError: regexp.MustCompile(`ChurchTools hat die Änderung ignoriert`),
+			},
+			{
+				// Config on the old name and the new type: a no-op only if state recorded type 12.
+				Config:   groupTypeConfig(mock.URL, "Gruppe 010", "12"),
+				PlanOnly: true,
+			},
+		},
+	})
+}

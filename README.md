@@ -125,7 +125,7 @@ and calls `POST /groups/{id}/grouptype` with a `roleMapping` over every role of 
 type (ids from `/group/roles`; the design and the live verification are ct-cli's,
 `src/engine/grouptype.ts`). A role maps to the same-named role of the new type, or, if
 nobody holds it in this group, to the new type's default role. A role that holds members
-and has no same-named target fails plan and apply with a German error naming it. **Not
+and has no same-named target fails plan and apply with a German error naming it. The members read asks for all four `group_member_statuses[]` (active, requested, to_delete, waiting) explicitly; eqrm-dev's default listing includes `to_delete`, but `requested` and `waiting` have not been verified live. A same-name match that turns a leader role into a participant role (or back) is kept but marked in the plan warning. **Not
 verified against a live instance from this provider**, and whether CT keeps a group's
 per-role grants (`churchtools_group_role`) across the migration is open.
 

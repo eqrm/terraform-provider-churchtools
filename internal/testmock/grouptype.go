@@ -41,6 +41,15 @@ func (s *Server) LastGroupTypePost(groupID int) map[string]any {
 	return s.lastTypePost[strconv.Itoa(groupID)]
 }
 
+// LastMembersStatuses returns the group_member_statuses[] values of the most recent
+// GET /groups/{id}/members for that group (nil if none was sent). Seeded members all
+// count as every status.
+func (s *Server) LastMembersStatuses(groupID int) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.membersStatuses[strconv.Itoa(groupID)]
+}
+
 // handleGroupType serves /groups/{id}/members and /groups/{id}/grouptype.
 func (s *Server) handleGroupType(w http.ResponseWriter, r *http.Request) bool {
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api"), "/"), "/")
@@ -64,6 +73,21 @@ func (s *Server) handleGroupType(w http.ResponseWriter, r *http.Request) bool {
 	}
 
 	if parts[2] == "members" {
+		// CT's group_member_statuses[] takes active, requested, to_delete, waiting.
+		statuses := r.URL.Query()["group_member_statuses[]"]
+		for _, st := range statuses {
+			switch st {
+			case "active", "requested", "to_delete", "waiting":
+			default:
+				w.WriteHeader(http.StatusBadRequest)
+				writeData(w, map[string]any{"message": "group_member_statuses: invalid value " + st})
+				return true
+			}
+		}
+		if s.membersStatuses == nil {
+			s.membersStatuses = map[string][]string{}
+		}
+		s.membersStatuses[id] = statuses
 		roleIDs := s.members[id]
 		page, limit := pageParams(r)
 		lo, hi := (page-1)*limit, page*limit
