@@ -55,6 +55,14 @@ outstanding. Build it locally in the meantime (_Local development_).
 
 ## What is verified, and what is not
 
+Token mode's single login and its renewal are verified against the mock only.
+Mid-run session expiry has never been exercised against a live instance, nor
+has REST with a cookie the provider bought itself (session mode has run live
+with a ct-cli cookie). The mock models expiry as 401 on REST and as `200
+{"status":"error","message":"Session expired!"}` on the legacy endpoint, which
+the provider renews once. ChurchTools answers a lapsed session on `/groups`
+with 403, not 401, so there is no renewal there and the read fails closed.
+
 Worth stating plainly, because "it has tests" and "its writes work" are different
 claims here.
 
@@ -245,6 +253,16 @@ production instance an administrator credential. It cannot be rotated without
 invalidating every other use of it, so a copy in a `.tfvars`, a CI variable or a
 `TF_LOG=DEBUG` transcript outlives whoever put it there. That asymmetry is the
 whole reason the session mode exists.
+
+In token mode the provider logs in **once per run**: it exchanges the token for a
+session (`GET /api/whoami?login_token=…`, then `GET /api/csrftoken`) on the first
+request, shares that session between all resources, and sends it as a cookie
+(plus the CSRF header on writes) instead of repeating `Authorization: Login` on
+every call, which ChurchTools logs as one login per request. If the session
+lapses mid-run, the provider logs in again once and retries the refused request
+once; a login answered with 429 is retried with `Retry-After` (bounded, a few
+attempts) and then fails with a clear error. The token never appears in
+diagnostics. Session mode never logs in.
 
 Set exactly one of the two. Supplying both is an error rather than a precedence
 rule: an author who thinks the credential they just added is the live one, and
