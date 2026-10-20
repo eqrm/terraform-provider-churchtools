@@ -14,8 +14,9 @@ import (
 const GroupRolesCollection = "/group/roles"
 
 // PutGroupRole sends PUT /group/roles/{id}. It does not decode the reply: the
-// OpenAPI answers 200 with the row, but only the read-back after the write
-// proves what was stored, so callers GET afterwards.
+// OpenAPI (CT 3.137) answers 204 No Content (not verified live); either
+// way only the read-back after the write proves what was stored, so callers GET
+// afterwards.
 func (c *Client) PutGroupRole(ctx context.Context, id string, body Row) error {
 	_, err := c.doItem(ctx, http.MethodPut, GroupRolesCollection, id, body)
 	return err

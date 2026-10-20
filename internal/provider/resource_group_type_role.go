@@ -109,7 +109,7 @@ func (r *groupTypeRoleResource) ValidateConfig(ctx context.Context, req resource
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if !m.RoleID.IsUnknown() && !m.RoleID.IsNull() && !roleIDPattern.MatchString(m.RoleID.ValueString()) {
+	if !m.RoleID.IsUnknown() && !m.RoleID.IsNull() && !digitsOnly.MatchString(m.RoleID.ValueString()) {
 		resp.Diagnostics.AddAttributeError(path.Root("role_id"), "Ungültige id",
 			fmt.Sprintf("%q ist keine Rollen-id.", m.RoleID.ValueString()))
 	}
@@ -227,7 +227,7 @@ func (r *groupTypeRoleResource) Delete(_ context.Context, _ resource.DeleteReque
 // (import runs Read without the configuration, see parsePreserveSuffix).
 func (r *groupTypeRoleResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	parts := strings.Split(req.ID, "/")
-	if (len(parts) != 1 && len(parts) != 2) || !roleIDPattern.MatchString(parts[0]) {
+	if (len(parts) != 1 && len(parts) != 2) || !digitsOnly.MatchString(parts[0]) {
 		resp.Diagnostics.AddError("Ungültige Import-id",
 			fmt.Sprintf("%q: erwartet die Rollen-id, optional /<dimension>,<dimension> für preserve_unknown, "+
 				"z. B. 160 oder 160/crp_query.", req.ID))

@@ -46,6 +46,9 @@ type Server struct {
 	// roleMembers makes DELETE /group/roles/{id} answer 409 (roles.go).
 	roleMembers map[string]int
 	roleDeletes int
+	// failNextRoleGet and roleGetHook: see roles.go.
+	failNextRoleGet bool
+	roleGetHook     func(row map[string]any)
 }
 
 func New() *Server {

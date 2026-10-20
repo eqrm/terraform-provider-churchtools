@@ -40,9 +40,9 @@ Dynamic groups follow in a later change.
 
 Nothing is ever deleted in ChurchTools, with one exception:
 `group_role_definition` really deletes the role (see below). Every other
-resource's `Delete` **un-manages** the object instead: it drops it from state, leaves it untouched in ChurchTools,
-and emits a warning that points the operator to the ChurchTools UI if it should
-really go.
+resource's `Delete` **un-manages** the object instead: it drops it from state,
+leaves it untouched in ChurchTools, and emits a warning that points the operator
+to the ChurchTools UI if it should really go.
 
 ## Install
 
@@ -222,9 +222,16 @@ pairing. Example: [`examples/resources/churchtools_group_role`](examples/resourc
   Destroy un-manages.
 
 The mock models these domains from CT 3.137's OpenAPI text and from ct-cli's
-behaviour. **Not verified live**: that dev accepts `isInherited` on
-`group_type_role`, the 409 report of a real role delete, and the `status` domain's
-scope handling. Run a read-only import and an empty plan on dev first.
+behaviour. `group_role_definition`, `group_type_role` and `person_status_grants`
+are **mock-only, not verified live**. Open points:
+
+- `group_type_role`: whether dev accepts `isInherited` on write.
+- `group_role_definition`: the shape of the 409 report of a real role delete, and
+  `PUT /group/roles/{id}`, which the OpenAPI says answers 204 with no body (the
+  mock does the same; the client ignores the body either way).
+- `person_status_grants`: how the `status` domain handles scope.
+
+Run a read-only import and an empty plan on dev first.
 
 ## Authentication
 

@@ -3,7 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
-	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/eqrm/terraform-provider-churchtools/internal/client"
@@ -195,7 +195,7 @@ func (m *groupRoleDefinitionModel) fromRow(row client.Row) {
 // writeBody is the full object CT's PUT/POST wants (all eight fields are
 // required): `base` supplies everything the plan leaves unknown, so values this
 // configuration does not manage are carried through, not reset.
-func (m groupRoleDefinitionModel) writeBody(base client.Row) client.Row {
+func (m groupRoleDefinitionModel) writeBody(base client.Row) (client.Row, error) {
 	pick := func(v types.String, key string) any {
 		if !v.IsUnknown() && !v.IsNull() {
 			return v.ValueString()
@@ -213,8 +213,10 @@ func (m groupRoleDefinitionModel) writeBody(base client.Row) client.Row {
 		"growPathId":  base["growPathId"], // never managed: null stays null
 	}
 	if !m.GroupTypeID.IsUnknown() && !m.GroupTypeID.IsNull() {
-		var n int64
-		fmt.Sscanf(m.GroupTypeID.ValueString(), "%d", &n)
+		n, err := strconv.ParseInt(m.GroupTypeID.ValueString(), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("group_type_id %q ist keine Zahl: %w", m.GroupTypeID.ValueString(), err)
+		}
 		body["groupTypeId"] = n
 	}
 	if !m.SortKey.IsUnknown() && !m.SortKey.IsNull() {
@@ -226,7 +228,7 @@ func (m groupRoleDefinitionModel) writeBody(base client.Row) client.Row {
 	if !m.IsHidden.IsUnknown() && !m.IsHidden.IsNull() {
 		body["isHidden"] = m.IsHidden.ValueBool()
 	}
-	return body
+	return body, nil
 }
 
 // verify compares what the read-back shows with what the plan asked for: CT can
@@ -275,7 +277,12 @@ func (r *groupRoleDefinitionResource) Create(ctx context.Context, req resource.C
 		"isHidden":   false,
 		"growPathId": nil,
 	}
-	row, err := r.client.Create(ctx, client.GroupRolesCollection, plan.writeBody(base))
+	body, err := plan.writeBody(base)
+	if err != nil {
+		resp.Diagnostics.AddError(summary, err.Error())
+		return
+	}
+	row, err := r.client.Create(ctx, client.GroupRolesCollection, body)
 	if err != nil {
 		resp.Diagnostics.AddError(summary, err.Error())
 		return
@@ -287,6 +294,26 @@ func (r *groupRoleDefinitionResource) Create(ctx context.Context, req resource.C
 	}
 	live, err := r.client.Get(ctx, client.GroupRolesCollection, id)
 	if err != nil {
+		// The role exists, only the read-back failed. Record it (id set, unknown
+		// computed attributes null) so a retry does not POST a duplicate; the
+		// error taints the resource.
+		saved := plan
+		saved.ID = types.StringValue(id)
+		if saved.SortKey.IsUnknown() {
+			saved.SortKey = types.Int64Null()
+		}
+		if saved.Shorty.IsUnknown() {
+			saved.Shorty = types.StringNull()
+		}
+		if saved.IsDefault.IsUnknown() {
+			saved.IsDefault = types.BoolNull()
+		}
+		if saved.IsHidden.IsUnknown() {
+			saved.IsHidden = types.BoolNull()
+		}
+		saved.NameTranslated = types.StringNull()
+		saved.GrowPathID = types.Int64Null()
+		resp.Diagnostics.Append(resp.State.Set(ctx, saved)...)
 		resp.Diagnostics.AddError(summary, fmt.Sprintf("Rolle %s nach dem Anlegen nicht lesbar: %s", id, err))
 		return
 	}
@@ -329,9 +356,10 @@ func (r *groupRoleDefinitionResource) Update(ctx context.Context, req resource.U
 	if notConfigured(r.client, &resp.Diagnostics) {
 		return
 	}
-	var plan, state groupRoleDefinitionModel
+	var plan, state, config groupRoleDefinitionModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -344,7 +372,28 @@ func (r *groupRoleDefinitionResource) Update(ctx context.Context, req resource.U
 		resp.Diagnostics.AddError(summary, fmt.Sprintf("Rolle %s nicht lesbar: %s", id, err))
 		return
 	}
-	if err := r.client.PutGroupRole(ctx, id, plan.writeBody(live)); err != nil {
+	// Optional+Computed attributes the configuration leaves out carry the old
+	// STATE value in the plan (UseStateForUnknown). Sending that would revert UI
+	// edits and CT side effects (a new default role clears is_default here), so
+	// they are nulled and the live value wins in writeBody.
+	if config.SortKey.IsNull() {
+		plan.SortKey = types.Int64Null()
+	}
+	if config.Shorty.IsNull() {
+		plan.Shorty = types.StringNull()
+	}
+	if config.IsDefault.IsNull() {
+		plan.IsDefault = types.BoolNull()
+	}
+	if config.IsHidden.IsNull() {
+		plan.IsHidden = types.BoolNull()
+	}
+	body, err := plan.writeBody(live)
+	if err != nil {
+		resp.Diagnostics.AddError(summary, err.Error())
+		return
+	}
+	if err := r.client.PutGroupRole(ctx, id, body); err != nil {
 		resp.Diagnostics.AddError(summary, err.Error())
 		return
 	}
@@ -392,10 +441,8 @@ func (r *groupRoleDefinitionResource) Delete(ctx context.Context, req resource.D
 	}
 }
 
-var roleIDPattern = regexp.MustCompile(`^[0-9]+$`)
-
 func (r *groupRoleDefinitionResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	if !roleIDPattern.MatchString(req.ID) {
+	if !digitsOnly.MatchString(req.ID) {
 		resp.Diagnostics.AddError("Ungültige Import-id",
 			fmt.Sprintf("%q: erwartet die Rollen-id (Zahl), z. B. 160.", req.ID))
 		return

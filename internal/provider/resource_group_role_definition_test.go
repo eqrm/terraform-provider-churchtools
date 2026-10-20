@@ -259,3 +259,74 @@ func TestAccGroupRoleDefinition_Validation(t *testing.T) {
 		})
 	}
 }
+
+// Attributes the configuration leaves out must not be re-sent from STATE: the
+// live row may have changed since (UI edit, CT clearing is_default). The mock
+// bumps sortKey after every GET, so the row the Update reads is newer than the
+// state; the PUT must carry that live value, not the state's. (Terraform then
+// reports the changed computed value as an inconsistent result -- which is the
+// drift surfacing, instead of being silently reverted.)
+func TestAccGroupRoleDefinition_UpdateKeepsLiveUnmanaged(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	var served []float64
+	mock.SetRoleGetHook(func(row map[string]any) {
+		n, _ := row["sortKey"].(float64)
+		served = append(served, n)
+		row["sortKey"] = n + 1
+	})
+	cfg := func(name string) string {
+		return providerBlock(mock.URL) + fmt.Sprintf(roleDefConfig, name)
+	}
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: cfg("Mitglied")},
+			{
+				Config:      cfg("Mitglieder"),
+				ExpectError: regexp.MustCompile(`(?i)inconsistent|unexpected new value`),
+			},
+			{
+				PreConfig: func() {
+					// The Update read the live row (value u), PUT it, and the read-back
+					// served u again. A PUT from state would have sent an older value.
+					if len(served) < 3 || served[len(served)-1] != served[len(served)-2] {
+						t.Errorf("PUT did not carry the live sort_key; GETs served %v, PUT %v", served, mock.LastPut("/group/roles"))
+					}
+				},
+				Config:   cfg("Mitglieder"),
+				PlanOnly: true,
+			},
+		},
+	})
+}
+
+// POST succeeded but the read-back failed: the role is in state (tainted), so a
+// retry replaces it instead of creating a duplicate.
+func TestAccGroupRoleDefinition_CreateReadBackFailureKeepsID(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	cfg := providerBlock(mock.URL) + fmt.Sprintf(roleDefConfig, "Mitglied")
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{
+				PreConfig:   mock.FailNextRoleGet,
+				Config:      cfg,
+				ExpectError: regexp.MustCompile(`nicht lesbar`),
+			},
+			{
+				Config: cfg,
+				Check: func(*terraform.State) error {
+					if mock.Row("/group/roles", 1001) != nil {
+						return fmt.Errorf("the first role was orphaned (duplicate created)")
+					}
+					if mock.Row("/group/roles", 1002) == nil {
+						return fmt.Errorf("no replacement role")
+					}
+					return nil
+				},
+			},
+		},
+	})
+}

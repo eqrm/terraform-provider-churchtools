@@ -95,7 +95,7 @@ func (r *personStatusGrantsResource) ValidateConfig(ctx context.Context, req res
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if !m.PersonStatusID.IsUnknown() && !m.PersonStatusID.IsNull() && !roleIDPattern.MatchString(m.PersonStatusID.ValueString()) {
+	if !m.PersonStatusID.IsUnknown() && !m.PersonStatusID.IsNull() && !digitsOnly.MatchString(m.PersonStatusID.ValueString()) {
 		resp.Diagnostics.AddAttributeError(path.Root("person_status_id"), "Ungültige id",
 			fmt.Sprintf("%q ist keine Personenstatus-id.", m.PersonStatusID.ValueString()))
 	}
@@ -184,7 +184,7 @@ func (r *personStatusGrantsResource) Delete(_ context.Context, _ resource.Delete
 // ImportState takes the status id, or `<status id>/<dim>,<dim>` for preserve_unknown.
 func (r *personStatusGrantsResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	parts := strings.Split(req.ID, "/")
-	if (len(parts) != 1 && len(parts) != 2) || !roleIDPattern.MatchString(parts[0]) {
+	if (len(parts) != 1 && len(parts) != 2) || !digitsOnly.MatchString(parts[0]) {
 		resp.Diagnostics.AddError("Ungültige Import-id",
 			fmt.Sprintf("%q: erwartet die Personenstatus-id, optional /<dimension>,<dimension> für "+
 				"preserve_unknown, z. B. 0.", req.ID))

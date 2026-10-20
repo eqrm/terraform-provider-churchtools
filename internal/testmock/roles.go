@@ -32,6 +32,21 @@ func (s *Server) SetRoleMembers(id int, n int) {
 	s.roleMembers[strconv.Itoa(id)] = n
 }
 
+// FailNextRoleGet makes the next GET of a single role answer 500 once.
+func (s *Server) FailNextRoleGet() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failNextRoleGet = true
+}
+
+// SetRoleGetHook runs fn on the stored row after every GET of a single role has
+// been answered, so the next GET sees an out-of-band change.
+func (s *Server) SetRoleGetHook(fn func(row map[string]any)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.roleGetHook = fn
+}
+
 // RoleDeletes counts the DELETE calls that reached a role (dry runs excluded).
 func (s *Server) RoleDeletes() int {
 	s.mu.Lock()
@@ -91,7 +106,28 @@ func (s *Server) handleRoleWrite(w http.ResponseWriter, r *http.Request, id stri
 		row["id"] = cur.(map[string]any)["id"]
 		rows[id] = row
 		s.keepOneDefaultRole(id, row)
-		writeData(w, row)
+		// OpenAPI (CT 3.137): PUT /group/roles/{roleId} answers 204 No Content.
+		w.WriteHeader(http.StatusNoContent)
+		return true
+	case http.MethodGet:
+		if id == "" {
+			return false
+		}
+		if s.failNextRoleGet {
+			s.failNextRoleGet = false
+			w.WriteHeader(http.StatusInternalServerError)
+			return true
+		}
+		cur, ok := rows[id].(map[string]any)
+		if s.roleGetHook == nil || !ok {
+			return false
+		}
+		served := map[string]any{}
+		for k, v := range cur {
+			served[k] = v
+		}
+		writeData(w, served)
+		s.roleGetHook(cur) // changes the stored row after this reply, like a UI edit
 		return true
 	case http.MethodDelete:
 		if _, ok := rows[id]; !ok {
