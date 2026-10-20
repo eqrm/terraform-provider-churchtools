@@ -63,6 +63,14 @@ outstanding. Build it locally in the meantime (_Local development_).
 
 ## What is verified, and what is not
 
+Token mode's single login and its renewal are verified against the mock only.
+Mid-run session expiry has never been exercised against a live instance, nor
+has REST with a cookie the provider bought itself (session mode has run live
+with a ct-cli cookie). The mock models expiry as 401 on REST and as `200
+{"status":"error","message":"Session expired!"}` on the legacy endpoint, which
+the provider renews once. ChurchTools answers a lapsed session on `/groups`
+with 403, not 401, so there is no renewal there and the read fails closed.
+
 Worth stating plainly, because "it has tests" and "its writes work" are different
 claims here.
 
@@ -126,6 +134,23 @@ group back and fails with „ChurchTools hat
 die Änderung ignoriert“ if any of the four values differs from the plan, so a silent
 ignore is an error rather than drift. Delete only un-manages; CT's DELETE would 409 on
 references and destroy memberships.
+
+A `group_type_id` change is a migration: CT answers `PATCH groupTypeId` with
+`400 groupTypeId: validation.always.invalid`, so Update leaves the field out of the PATCH
+and calls `POST /groups/{id}/grouptype` with a `roleMapping` over every role of the old
+type (ids from `/group/roles`; the design and the live verification are ct-cli's,
+`src/engine/grouptype.ts`). A role maps to the same-named role of the new type, or, if
+nobody holds it in this group, to the new type's default role. A role that holds members
+and has no same-named target fails plan and apply with a German error naming it. The
+members read asks for all four `group_member_statuses[]` (active, requested, to_delete,
+waiting) explicitly; eqrm-dev's default listing includes `to_delete`, but `requested` and
+`waiting` have not been verified live. A same-name match that turns a leader role into a
+participant role (or back) is kept but marked in the plan warning. Ran live on eqrm-dev
+on 2026-10-20 from this provider: an empty probe group (2041) went from type 5 (Team) to
+21 (Local Lead) and back, both `POST /grouptype` calls were accepted, the follow-up plan
+was empty and the plan warning listed the mapping. **Not verified live:** a migration
+with members in the group, and whether CT keeps a group's per-role grants
+(`churchtools_group_role`) across it.
 
 `group_role` (`/permissions/group_role/{pairingId}`, pairing resolved through
 `/groups/{id}/roles`) ran live on eqrm-dev on 2026-10-19 (sll_koblenz Mitglied,
@@ -285,6 +310,16 @@ production instance an administrator credential. It cannot be rotated without
 invalidating every other use of it, so a copy in a `.tfvars`, a CI variable or a
 `TF_LOG=DEBUG` transcript outlives whoever put it there. That asymmetry is the
 whole reason the session mode exists.
+
+In token mode the provider logs in **once per run**: it exchanges the token for a
+session (`GET /api/whoami?login_token=…`, then `GET /api/csrftoken`) on the first
+request, shares that session between all resources, and sends it as a cookie
+(plus the CSRF header on writes) instead of repeating `Authorization: Login` on
+every call, which ChurchTools logs as one login per request. If the session
+lapses mid-run, the provider logs in again once and retries the refused request
+once; a login answered with 429 is retried with `Retry-After` (bounded, a few
+attempts) and then fails with a clear error. The token never appears in
+diagnostics. Session mode never logs in.
 
 Set exactly one of the two. Supplying both is an error rather than a precedence
 rule: an author who thinks the credential they just added is the live one, and

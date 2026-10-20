@@ -191,3 +191,211 @@ func TestAccGroup_ImportRejectsNonNumericID(t *testing.T) {
 		},
 	})
 }
+
+// seedTypeMigration installs group 5001 on type 11 with the roles Leiter (101),
+// Mitglied (102, default) and Gast (103), plus the given roles on type 12. Memberships:
+// two Leiter, one Mitglied, nobody Gast.
+func seedTypeMigration(mock *testmock.Server, targets map[int]map[string]any) {
+	mock.Seed("/groups", 5001, map[string]any{
+		"name": "Gruppe 010",
+		"information": map[string]any{
+			"groupTypeId": float64(11), "groupStatusId": float64(2), "campusId": nil,
+		},
+	})
+	role := func(id, typ int, name, kind string, def bool) {
+		mock.Seed("/group/roles", id, map[string]any{"name": name, "groupTypeId": float64(typ), "type": kind, "isDefault": def})
+	}
+	role(101, 11, "Leiter", "leader", false)
+	role(102, 11, "Mitglied", "participant", true)
+	role(103, 11, "Gast", "participant", false)
+	for id, r := range targets {
+		role(id, 12, r["name"].(string), r["type"].(string), r["default"].(bool))
+	}
+	mock.SeedMembers(5001, 101, 101, 102)
+}
+
+func groupTypeConfig(host, name, typeID string) string {
+	return providerBlock(host) + `
+import {
+  to = churchtools_group.g
+  id = "5001"
+}
+resource "churchtools_group" "g" {
+  name            = "` + name + `"
+  group_type_id   = "` + typeID + `"
+  group_status_id = "2"
+}`
+}
+
+// A type change goes through POST /groups/{id}/grouptype with a mapping for every role
+// of the old type, and PATCH never carries groupTypeId (CT 400s it). A rename in the
+// same apply still travels by PATCH.
+func TestAccGroup_TypeMigration(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedTypeMigration(mock, map[int]map[string]any{
+		201: {"name": "Leiter", "type": "leader", "default": false},
+		202: {"name": "mitglied", "type": "participant", "default": true},
+		203: {"name": "GAST", "type": "participant", "default": false},
+	})
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: groupTypeConfig(mock.URL, "Gruppe 010", "11")},
+			{
+				Config: groupTypeConfig(mock.URL, "Gruppe 010 neu", "12"),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("churchtools_group.g", "group_type_id", "12"),
+					func(*terraform.State) error {
+						want := map[string]any{
+							"groupTypeId": float64(12),
+							"roleMapping": map[string]any{"101": float64(201), "102": float64(202), "103": float64(203)},
+						}
+						if got := mock.LastGroupTypePost(5001); !reflect.DeepEqual(got, want) {
+							t.Errorf("POST grouptype body = %v, want %v", got, want)
+						}
+						if got, want := mock.LastPatch("/groups"), map[string]any{"name": "Gruppe 010 neu"}; !reflect.DeepEqual(got, want) {
+							t.Errorf("PATCH body = %v, want %v", got, want)
+						}
+						if got, want := mock.Members(5001), []int{201, 201, 202}; !reflect.DeepEqual(got, want) {
+							t.Errorf("members after migration = %v, want %v", got, want)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+// A role nobody holds and no same-named target for goes to the target type's default
+// role, and a type-only change sends no PATCH at all.
+func TestAccGroup_TypeMigrationEmptyRoleFallsBackToDefault(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedTypeMigration(mock, map[int]map[string]any{
+		201: {"name": "Leiter", "type": "leader", "default": false},
+		202: {"name": "Mitglied", "type": "participant", "default": false},
+		203: {"name": "Teilnehmer", "type": "participant", "default": true},
+	})
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: groupTypeConfig(mock.URL, "Gruppe 010", "11")},
+			{
+				Config: groupTypeConfig(mock.URL, "Gruppe 010", "12"),
+				Check: func(*terraform.State) error {
+					want := map[string]any{
+						"groupTypeId": float64(12),
+						"roleMapping": map[string]any{"101": float64(201), "102": float64(202), "103": float64(203)},
+					}
+					if got := mock.LastGroupTypePost(5001); !reflect.DeepEqual(got, want) {
+						t.Errorf("POST grouptype body = %v, want %v", got, want)
+					}
+					if got := mock.LastPatch("/groups"); got != nil {
+						t.Errorf("PATCH sent %v, want none for a type-only change", got)
+					}
+					return nil
+				},
+			},
+		},
+	})
+}
+
+// A role that holds members and has no same-named target stops the plan, before any write.
+func TestAccGroup_TypeMigrationRefusesOccupiedUnmappedRole(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedTypeMigration(mock, map[int]map[string]any{
+		201: {"name": "Leiter", "type": "leader", "default": false},
+		202: {"name": "Teilnehmer", "type": "participant", "default": true},
+	})
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: groupTypeConfig(mock.URL, "Gruppe 010", "11")},
+			{
+				Config:      groupTypeConfig(mock.URL, "Gruppe 010", "12"),
+				PlanOnly:    true,
+				ExpectError: regexp.MustCompile(`(?s)Gruppentyp kann nicht gewechselt.*"Mitglied" \(Rolle 102, 1 Mitglied`),
+			},
+			{
+				Config:      groupTypeConfig(mock.URL, "Gruppe 010", "12"),
+				ExpectError: regexp.MustCompile(`(?s)Gruppentyp kann nicht gewechselt`),
+			},
+			{
+				PreConfig: func() {
+					if got := mock.LastGroupTypePost(5001); got != nil {
+						t.Errorf("a refused migration still POSTed %v", got)
+					}
+				},
+				Config:   groupTypeConfig(mock.URL, "Gruppe 010", "11"),
+				PlanOnly: true,
+			},
+		},
+	})
+}
+
+// The only holders of Mitglied sit on member page 2 (the client pages at 100): a
+// first-page-only read would call the role empty and map its members away.
+func TestAccGroup_TypeMigrationCountsMembersOnLaterPages(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedTypeMigration(mock, map[int]map[string]any{
+		201: {"name": "Leiter", "type": "leader", "default": false},
+		202: {"name": "Teilnehmer", "type": "participant", "default": true},
+	})
+	roles := make([]int, 0, 150)
+	for i := 0; i < 100; i++ {
+		roles = append(roles, 101)
+	}
+	for i := 0; i < 50; i++ {
+		roles = append(roles, 102)
+	}
+	mock.SeedMembers(5001, roles...)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: groupTypeConfig(mock.URL, "Gruppe 010", "11")},
+			{
+				Config:      groupTypeConfig(mock.URL, "Gruppe 010", "12"),
+				PlanOnly:    true,
+				ExpectError: regexp.MustCompile(`(?s)"Mitglied" \(Rolle 102, 50 Mitglied`),
+			},
+		},
+	})
+}
+
+// The migration lands, then CT ignores the rename in the same apply: the verify loop
+// errors, but state must hold the new type (not the stale one), so the next plan
+// shows only the ignored field.
+func TestAccGroup_TypeMigrationKeepsNewTypeWhenVerifyFails(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedTypeMigration(mock, map[int]map[string]any{
+		201: {"name": "Leiter", "type": "leader", "default": false},
+		202: {"name": "Mitglied", "type": "participant", "default": true},
+		203: {"name": "Gast", "type": "participant", "default": false},
+	})
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: groupTypeConfig(mock.URL, "Gruppe 010", "11")},
+			{
+				PreConfig:   func() { mock.IgnoreOnPatch("/groups", 5001, "name") },
+				Config:      groupTypeConfig(mock.URL, "Gruppe 010 neu", "12"),
+				ExpectError: regexp.MustCompile(`ChurchTools hat die Änderung ignoriert`),
+			},
+			{
+				// Config on the old name and the new type: a no-op only if state recorded type 12.
+				Config:   groupTypeConfig(mock.URL, "Gruppe 010", "12"),
+				PlanOnly: true,
+			},
+		},
+	})
+}
