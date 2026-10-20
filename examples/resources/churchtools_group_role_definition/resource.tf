@@ -12,11 +12,8 @@ resource "churchtools_group_role_definition" "mentor" {
   is_hidden  = false
   is_default = false
 
-  # Deleting a role deletes it in ChurchTools, and CT answers 409 while any
-  # membership still uses it. Guard it.
-  lifecycle {
-    prevent_destroy = true
-  }
+  # Removing this block only drops the role from state (with a warning); it
+  # keeps existing in ChurchTools. Delete it by hand in the ChurchTools UI.
 }
 
 # Import: the role id.

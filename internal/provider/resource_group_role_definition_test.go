@@ -78,9 +78,9 @@ resource "churchtools_group_role_definition" "x" {
 			{Config: cfg("Kleingruppenleitung", "sort_key = 3\n  is_hidden = true"), PlanOnly: true},
 		},
 		CheckDestroy: func(*terraform.State) error {
-			// Destroy really deletes.
-			if mock.RoleDeletes() != 1 {
-				return fmt.Errorf("DELETE reached the role %d times, want 1", mock.RoleDeletes())
+			// Destroy only un-manages: no DELETE, the role stays in CT.
+			if mock.RoleDeletes() != 0 {
+				return fmt.Errorf("DELETE reached the role %d times, want 0", mock.RoleDeletes())
 			}
 			return nil
 		},
@@ -182,13 +182,14 @@ resource "churchtools_group_role_definition" "x" {
 			{Config: cfg, PlanOnly: true},
 		},
 	})
-	if mock.RoleDeletes() != 1 { // only the final destroy
-		t.Fatalf("role deleted %d times, want 1 (the final destroy)", mock.RoleDeletes())
+	if mock.RoleDeletes() != 0 { // even the final destroy never deletes
+		t.Fatalf("role deleted %d times, want 0", mock.RoleDeletes())
 	}
 }
 
-// Destroy deletes, and surfaces CT's 409 while memberships reference the role.
-func TestAccGroupRoleDefinition_DestroyBlockedByMembers(t *testing.T) {
+// Destroy only drops the role from state: no DELETE is sent, the role stays in
+// CT even while memberships reference it.
+func TestAccGroupRoleDefinition_DestroyOnlyUnmanages(t *testing.T) {
 	mock := testmock.New()
 	defer mock.Close()
 	cfg := providerBlock(mock.URL) + fmt.Sprintf(roleDefConfig, "Gast")
@@ -201,21 +202,11 @@ func TestAccGroupRoleDefinition_DestroyBlockedByMembers(t *testing.T) {
 				return err
 			}},
 			{
-				PreConfig:   func() { mock.SetRoleMembers(id, 3) },
-				Config:      providerBlock(mock.URL), // removed from config: the plan destroys it
-				ExpectError: regexp.MustCompile(`(?s)Rolle kann nicht gelöscht werden.*409.*Mitgliedschaft.*3 Mitgliedschaft`),
-			},
-			{
-				PreConfig: func() {
-					if mock.RoleDeletes() != 0 || mock.Row("/group/roles", id) == nil {
-						panic("the blocked destroy removed the role")
-					}
-					mock.SetRoleMembers(id, 0)
-				},
-				Config: providerBlock(mock.URL),
+				PreConfig: func() { mock.SetRoleMembers(id, 3) },
+				Config:    providerBlock(mock.URL), // removed from config: the plan destroys it
 				Check: func(*terraform.State) error {
-					if mock.Row("/group/roles", id) != nil || mock.RoleDeletes() != 1 {
-						return fmt.Errorf("role not deleted (deletes %d)", mock.RoleDeletes())
+					if mock.RoleDeletes() != 0 || mock.Row("/group/roles", id) == nil {
+						return fmt.Errorf("destroy touched the role in CT (deletes %d)", mock.RoleDeletes())
 					}
 					return nil
 				},
@@ -302,7 +293,8 @@ func TestAccGroupRoleDefinition_UpdateKeepsLiveUnmanaged(t *testing.T) {
 }
 
 // POST succeeded but the read-back failed: the role is in state (tainted), so a
-// retry replaces it instead of creating a duplicate.
+// retry replaces it in state. Since Delete only un-manages, the first role stays
+// in CT and must be removed by hand.
 func TestAccGroupRoleDefinition_CreateReadBackFailureKeepsID(t *testing.T) {
 	mock := testmock.New()
 	defer mock.Close()
@@ -318,8 +310,8 @@ func TestAccGroupRoleDefinition_CreateReadBackFailureKeepsID(t *testing.T) {
 			{
 				Config: cfg,
 				Check: func(*terraform.State) error {
-					if mock.Row("/group/roles", 1001) != nil {
-						return fmt.Errorf("the first role was orphaned (duplicate created)")
+					if mock.Row("/group/roles", 1001) == nil {
+						return fmt.Errorf("the tainted role was deleted in CT; Delete must only un-manage")
 					}
 					if mock.Row("/group/roles", 1002) == nil {
 						return fmt.Errorf("no replacement role")
