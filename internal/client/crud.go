@@ -91,3 +91,11 @@ func (c *Client) Delete(ctx context.Context, collection, id string) error {
 	_, err := c.doItem(ctx, http.MethodDelete, collection, id, nil)
 	return err
 }
+
+// Post sends a POST to an action path that is not a collection create, e.g.
+// /groups/{id}/grouptype, and returns nothing: those endpoints answer 204 with
+// an empty body, so there is no row to decode.
+func (c *Client) Post(ctx context.Context, path string, body any) error {
+	_, err := c.do(ctx, http.MethodPost, path, body)
+	return err
+}

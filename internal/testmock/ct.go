@@ -43,6 +43,10 @@ type Server struct {
 	ignoreOnPut map[string]map[string]bool
 	// perm holds the permission routes' state (permissions.go).
 	perm *permState
+	// members and lastTypePost back the group type migration routes (grouptype.go).
+	members         map[string][]int
+	lastTypePost    map[string]map[string]any
+	membersStatuses map[string][]string
 
 	// Login accounting. Live ChurchTools logs "Erfolgreich angemeldet ...
 	// mittels logintoken" for every request that presents the token, whether
@@ -372,6 +376,8 @@ var supportedVerbs = map[string]map[string]bool{
 		http.MethodPatch:  true,
 		http.MethodDelete: true,
 	},
+	// Roles of all group types (id, name, groupTypeId, type, isDefault), read-only.
+	"/group/roles": {http.MethodGet: true},
 	// Data fields. Measured on eqrm-dev (CT 3.137) on 2026-09-29: PATCH answers
 	// "Must be one of: GET, PUT, DELETE", and PUT replaces (see putRequired).
 	"/dbfields": {
@@ -458,6 +464,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.handlePermissions(w, r) {
+		return
+	}
+	if s.handleGroupType(w, r) {
 		return
 	}
 
@@ -598,6 +607,13 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&body)
 		if r.Method == http.MethodPatch {
 			s.lastPatch[collection] = body
+			// Live CT: `400 groupTypeId: validation.always.invalid`. The type moves
+			// through POST /groups/{id}/grouptype (grouptype.go).
+			if _, has := body["groupTypeId"]; has && collection == "/groups" {
+				w.WriteHeader(http.StatusBadRequest)
+				writeData(w, map[string]any{"message": "groupTypeId: validation.always.invalid"})
+				return
+			}
 		}
 		if r.Method == http.MethodPut {
 			s.lastPut[collection] = body
