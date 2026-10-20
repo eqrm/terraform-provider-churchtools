@@ -31,10 +31,18 @@ in one group, with `preserve_unknown` for partially managed grant lists. It is
 covered by unit tests and the mock only; see below before using it on a real
 instance.
 
-Nothing is ever deleted in ChurchTools. Every resource's `Delete` **un-manages**
-the object instead: it drops it from state, leaves it untouched in ChurchTools,
-and emits a warning that points the operator to the ChurchTools UI if it should
-really go.
+Tier 3, part 1 adds three more, on the same grants engine (`internal/grants`,
+shared with `group_role`): `group_role_definition` (the role of a group type
+itself, `/group/roles`), `group_type_role` (its type-level grants,
+`/permissions/group_type_role/{roleId}`) and `person_status_grants` (the `status`
+permission domain). Their basic write paths ran live on dev once; see below.
+Dynamic groups follow in a later change.
+
+Nothing is ever deleted in ChurchTools, with one exception:
+`group_role_definition` really deletes the role (see below). Every other
+resource's `Delete` **un-manages** the object instead: it drops it from state,
+leaves it untouched in ChurchTools, and emits a warning that points the operator
+to the ChurchTools UI if it should really go.
 
 ## Install
 
@@ -157,7 +165,7 @@ these come from CT 3.137's OpenAPI text. The skip of rights the host does not of
 (701/702/2080 on eqrm-dev) is mock-tested; its right table (`getMasterData`) was
 probed read-only on eqrm-dev and eqrm (2026-10-19), but no apply has skipped a right
 live yet. Payload fixtures were captured read-only from
-eqrm-dev (`internal/provider/testdata/group_role/`). See
+eqrm-dev (`internal/grants/testdata/`). See
 [group_role](#group_role-and-preserve_unknown) for the semantics.
 
 ## group_role and preserve_unknown
@@ -217,6 +225,48 @@ pairing. Example: [`examples/resources/churchtools_group_role`](examples/resourc
   and apply first.
 - Import id: `<group id>/<role name>`, or `<group id>/<role name>/<dim>,<dim>` to
   carry `preserve_unknown` into the import so preserved rows never enter state.
+
+## Tier 3: role definitions, type-level grants, status grants
+
+- `churchtools_group_role_definition` (`/group/roles`, import id = role id) manages
+  `name`, `type`, `shorty`, `sort_key`, `is_default` and `is_hidden`. CT's PUT is
+  not partial and `nameTranslated` is read-only, so an update reads the live row,
+  overlays the planned values and sends the full object; `growPathId` is passed
+  through, never written. `group_type_id` cannot change: a change is a plan error,
+  not a replacement. **Destroy deletes the role.** CT answers 409 while memberships
+  reference it; the apply fails with CT's deletion report, and the way out is
+  `tofu state rm`. Put `lifecycle { prevent_destroy = true }` on it.
+- `churchtools_group_type_role` (`/permissions/group_type_role/{roleId}`, import id
+  = role id) has the same `grant` block, `applies_to_subgroups`, `preserve_unknown`
+  and `preserved_grants` as `group_role`. CT never accepts `type: revoke` on this
+  domain; like ct-cli, the provider removes a row with a DELETE naming `authId`,
+  `isInherited` and the exact `dataId`, and it never writes a deny row. Destroy
+  un-manages.
+- `churchtools_person_status_grants` (`/permissions/status/{statusId}`, import id =
+  status id) has no `applies_to_subgroups` and only takes authIds below 10000.
+  Destroy un-manages.
+
+The mock models these domains from CT 3.137's OpenAPI text and from ct-cli's
+behaviour. On 2026-10-20 all three ran live on eqrm-dev from this provider:
+
+- `group_role_definition`: create (role 295 in group type 57), rename through
+  `PUT /group/roles/{id}` with an empty follow-up plan and the unmanaged
+  `shorty`/`sort_key` kept, and destroy, after which CT answers 404 for the role.
+- `group_type_role`: one grant written on the new role, then removed through the
+  DELETE path; CT's row list was empty afterwards.
+- `person_status_grants`: import of status 0 (`Unbekannt`) put only the one
+  hand-written row into state and left CT's baseline rows out; a `churchdb:view`
+  grant was added and removed again, and the status ended with its original rows.
+
+Still **not verified live**:
+
+- `group_type_role`: whether dev accepts `isInherited` on write, and data-scoped
+  grants (the live run used a right without scope).
+- `group_role_definition`: the shape of the 409 report when memberships still
+  reference the role.
+- `person_status_grants`: data-scoped grants on the `status` domain.
+
+Run a read-only import and an empty plan on dev first.
 
 ## Authentication
 

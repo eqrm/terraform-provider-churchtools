@@ -4,26 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/eqrm/terraform-provider-churchtools/internal/client"
-	"github.com/hashicorp/terraform-plugin-framework/attr"
-	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
-
-const groupRoleDomain = "group_role"
 
 // churchtools_group_role: the grants one role holds in one group — the
 // `group_role` permission domain, addressed by CT's (group, role) pairing id.
@@ -51,42 +44,17 @@ type groupRoleModel struct {
 	Grants          types.Set    `tfsdk:"grant"`
 }
 
-type grantModel struct {
-	Right              types.String `tfsdk:"right"`
-	AppliesToSubgroups types.Bool   `tfsdk:"applies_to_subgroups"`
-	Groups             types.Set    `tfsdk:"groups"`
-	Campuses           types.Set    `tfsdk:"campuses"`
-	Departments        types.Set    `tfsdk:"departments"`
-	SecurityLevels     types.Set    `tfsdk:"security_levels"`
-	GroupTypes         types.Set    `tfsdk:"group_types"`
-	CommentViewers     types.Set    `tfsdk:"comment_viewers"`
-	DataIDs            types.Set    `tfsdk:"data_ids"`
+func (m *groupRoleModel) data() *grantsData {
+	return &grantsData{Grants: m.Grants, Preserve: m.PreserveUnknown, Preserved: m.PreservedGrants}
 }
 
-func (g *grantModel) scope() map[string]*types.Set {
-	return map[string]*types.Set{
-		"groups":          &g.Groups,
-		"campuses":        &g.Campuses,
-		"departments":     &g.Departments,
-		"security_levels": &g.SecurityLevels,
-		"group_types":     &g.GroupTypes,
-		"comment_viewers": &g.CommentViewers,
-		rawDataIDsAttr:    &g.DataIDs,
-	}
+func (m *groupRoleModel) setData(d *grantsData) {
+	m.Grants, m.PreserveUnknown, m.PreservedGrants = d.Grants, d.Preserve, d.Preserved
 }
 
-var grantAttrTypes = func() map[string]attr.Type {
-	m := map[string]attr.Type{
-		"right":                types.StringType,
-		"applies_to_subgroups": types.BoolType,
-	}
-	for _, a := range scopeAttrs {
-		m[a] = types.SetType{ElemType: types.StringType}
-	}
-	return m
-}()
-
-var grantObjectType = types.ObjectType{AttrTypes: grantAttrTypes}
+func (m *groupRoleModel) label(role string) string {
+	return fmt.Sprintf("Rolle %q in Gruppe %s", role, m.GroupID.ValueString())
+}
 
 func NewGroupRoleResource() resource.Resource { return &groupRoleResource{} }
 
@@ -99,72 +67,33 @@ func (r *groupRoleResource) Metadata(_ context.Context, req resource.MetadataReq
 	resp.TypeName = req.ProviderTypeName + "_group_role"
 }
 
+func (r *groupRoleResource) svc() grantsService {
+	return grantsService{client: r.client, kind: groupRoleKind}
+}
+
 func (r *groupRoleResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
-	idSet := func(desc string) schema.SetAttribute {
-		return schema.SetAttribute{ElementType: types.StringType, Optional: true, Description: desc}
+	attrs := grantsAttributes("group")
+	attrs["id"] = schema.StringAttribute{
+		Computed:      true,
+		Description:   "The (group, role) pairing id: the `group_role` permission domain.",
+		PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
+	}
+	attrs["group_id"] = schema.StringAttribute{
+		Required:      true,
+		Description:   "Id of the group, e.g. churchtools_group.x.id.",
+		PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+	}
+	attrs["role"] = schema.StringAttribute{
+		Required: true,
+		Description: "Role name as ChurchTools stores it (`name` on /groups/{id}/roles, e.g. " +
+			"\"Mitglied\", \"Leiter\", \"participant\"), not the translated label.",
+		PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 	}
 	resp.Schema = schema.Schema{
 		Description: "Die Rechte einer Rolle in einer Gruppe („Rechte verwalten“ an der Gruppe). " +
 			"Jedes nicht deklarierte Recht wird entzogen, außer auf den Dimensionen in preserve_unknown.",
-		Attributes: map[string]schema.Attribute{
-			"id": schema.StringAttribute{
-				Computed:      true,
-				Description:   "The (group, role) pairing id: the `group_role` permission domain.",
-				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
-			},
-			"group_id": schema.StringAttribute{
-				Required:      true,
-				Description:   "Id of the group, e.g. churchtools_group.x.id.",
-				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
-			},
-			"role": schema.StringAttribute{
-				Required: true,
-				Description: "Role name as ChurchTools stores it (`name` on /groups/{id}/roles, e.g. " +
-					"\"Mitglied\", \"Leiter\", \"participant\"), not the translated label.",
-				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
-			},
-			"preserve_unknown": schema.SetAttribute{
-				ElementType: types.StringType,
-				Optional:    true,
-				Description: "Scope dimensions (CT scope fields such as `crp_query`, `cc_html_template`, " +
-					"`cdb_gruppe`) on which grants NOT declared here are left alone instead of revoked. " +
-					"Unscoped rights are never preserved. Left out, every undeclared grant is revoked.",
-			},
-			"preserved_grants": schema.SetAttribute{
-				ElementType: types.StringType,
-				Computed:    true,
-				Description: "The live grants preserve_unknown keeps out of this resource, for review: " +
-					"„I forgot one“ and „I deliberately left the module grants alone“ must never look alike.",
-				PlanModifiers: []planmodifier.Set{preservedGrantsModifier{}},
-			},
-		},
-		Blocks: map[string]schema.Block{
-			"grant": schema.SetNestedBlock{
-				Description: "One right. Without a scope argument it is the right's row without a data " +
-					"selection; with one, one row per id.",
-				NestedObject: schema.NestedBlockObject{
-					Attributes: map[string]schema.Attribute{
-						"right": schema.StringAttribute{
-							Required:    true,
-							Description: "Right as `module:name` from CT's permission catalog, e.g. \"churchdb:view alldata\".",
-						},
-						"applies_to_subgroups": schema.BoolAttribute{
-							Optional: true,
-							Description: "true: the row CT marks isInherited, which applies in the SUBGROUPS of " +
-								"the group, not in the group itself. Left out: the group itself. Never write false.",
-						},
-						"groups":          idSet("Group ids (scope cdb_gruppe)."),
-						"campuses":        idSet("Campus ids (scope cdb_station). -1 = all."),
-						"departments":     idSet("Department ids (scope cdb_bereich). -1 = all."),
-						"security_levels": idSet("Security levels (scope cc_securitylevel)."),
-						"group_types":     idSet("Group type ids (scope cdb_gruppentyp)."),
-						"comment_viewers": idSet("Comment viewer ids (scope cdb_comment_viewer)."),
-						rawDataIDsAttr: idSet("Raw data ids, for every other scope dimension " +
-							"(crp_query, cc_html_template, cc_calcategory, …)."),
-					},
-				},
-			},
-		},
+		Attributes: attrs,
+		Blocks:     map[string]schema.Block{"grant": grantBlock(groupRoleKind)},
 	}
 }
 
@@ -172,11 +101,8 @@ func (r *groupRoleResource) Configure(_ context.Context, req resource.ConfigureR
 	r.client = configureClient(req, resp, r.client)
 }
 
-var dataIDPattern = regexp.MustCompile(`^(-1|0|[1-9][0-9]*)$`)
-
 // ValidateConfig catches at plan time what would otherwise be a silent wrong
-// grant: a scope on the wrong dimension, an explicit false that Read can never
-// reproduce, two blocks Read would merge into one.
+// grant; see validateGrants.
 func (r *groupRoleResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var m groupRoleModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &m)...)
@@ -184,216 +110,7 @@ func (r *groupRoleResource) ValidateConfig(ctx context.Context, req resource.Val
 		return
 	}
 	validatePreserve(m.PreserveUnknown, path.Root("preserve_unknown"), &resp.Diagnostics)
-
-	if m.Grants.IsNull() || m.Grants.IsUnknown() {
-		return
-	}
-	var objs []types.Object
-	resp.Diagnostics.Append(m.Grants.ElementsAs(ctx, &objs, false)...)
-	seen := map[string]bool{}
-	for _, o := range objs {
-		if o.IsUnknown() || o.IsNull() {
-			continue
-		}
-		var g grantModel
-		resp.Diagnostics.Append(o.As(ctx, &g, basetypes.ObjectAsOptions{})...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-		at := path.Root("grant")
-		if g.Right.IsUnknown() {
-			continue
-		}
-		right, ok := rightsCatalog.byName[g.Right.ValueString()]
-		if !ok {
-			resp.Diagnostics.AddAttributeError(at, "Unbekanntes Recht",
-				fmt.Sprintf("%q steht nicht im Rechte-Katalog (ChurchTools %s). Schreibweise wie in "+
-					"ct.config.ts, z. B. \"churchdb:view alldata\".", g.Right.ValueString(), rightsCatalog.version))
-			continue
-		}
-		if !g.AppliesToSubgroups.IsNull() && !g.AppliesToSubgroups.IsUnknown() && !g.AppliesToSubgroups.ValueBool() {
-			resp.Diagnostics.AddAttributeError(at, "applies_to_subgroups = false weglassen",
-				fmt.Sprintf("%s: Lass applies_to_subgroups weg statt false zu schreiben. Der gelesene "+
-					"Zustand kennt nur „gesetzt“ oder „nicht gesetzt“, false würde in jedem Plan als Änderung erscheinen.",
-					right.Name))
-		}
-		want := scopeAttrFor(right)
-		scoped, unknownScope := false, false
-		for _, a := range scopeAttrs {
-			v := *g.scope()[a]
-			if v.IsNull() {
-				continue
-			}
-			if v.IsUnknown() {
-				unknownScope = true
-			}
-			if a != want {
-				if want == "" {
-					resp.Diagnostics.AddAttributeError(at, "Recht ohne Auswahl",
-						fmt.Sprintf("%s hat keine Daten-Auswahl; %s gehört nicht dazu.", right.Name, a))
-				} else {
-					resp.Diagnostics.AddAttributeError(at, "Falsche Auswahl-Dimension",
-						fmt.Sprintf("%s wählt nach %s aus; schreib die ids in %s statt in %s.",
-							right.Name, right.ScopeField, want, a))
-				}
-				continue
-			}
-			scoped = true
-			if v.IsUnknown() {
-				continue
-			}
-			var ids []types.String
-			resp.Diagnostics.Append(v.ElementsAs(ctx, &ids, false)...)
-			if len(ids) == 0 {
-				resp.Diagnostics.AddAttributeError(at, "Leere Auswahl",
-					fmt.Sprintf("%s: %s = [] ist leer. Lass das Argument weg (Recht ohne Auswahl) oder nenne ids.",
-						right.Name, a))
-			}
-			for _, id := range ids {
-				if !id.IsUnknown() && !dataIDPattern.MatchString(id.ValueString()) {
-					resp.Diagnostics.AddAttributeError(at, "Ungültige id",
-						fmt.Sprintf("%s: %q ist keine ChurchTools-id (Zahl, oder -1 für alle).", right.Name, id.ValueString()))
-				}
-			}
-		}
-		if want != "" && !scoped {
-			resp.Diagnostics.AddAttributeWarning(at, "Recht ohne Auswahl",
-				fmt.Sprintf("%s wählt nach %s aus, der Block nennt aber keine ids. Das schreibt die Zeile "+
-					"ohne Auswahl (dataId null), nicht „alle“ — für alle schreib %s = [\"-1\"].",
-					right.Name, right.ScopeField, want))
-		}
-		if g.AppliesToSubgroups.IsUnknown() || unknownScope {
-			continue
-		}
-		k := grantSpec{Right: right.Name, Subgroups: g.AppliesToSubgroups.ValueBool()}
-		if scoped {
-			k.IDs = []int64{0}
-		}
-		if seen[k.specKey()] {
-			resp.Diagnostics.AddAttributeError(at, "Recht doppelt deklariert",
-				fmt.Sprintf("%s steht in mehr als einem grant-Block. Fasse die ids in einem Block zusammen; "+
-					"ChurchTools speichert sie als ein Recht, und der gelesene Zustand hätte nur einen Block.", right.Name))
-		}
-		seen[k.specKey()] = true
-	}
-}
-
-func validatePreserve(set types.Set, p path.Path, diags *diag.Diagnostics) {
-	if set.IsNull() || set.IsUnknown() {
-		return
-	}
-	for _, e := range set.Elements() {
-		s, ok := e.(types.String)
-		if !ok || s.IsUnknown() {
-			continue
-		}
-		if !rightsCatalog.dimensions[s.ValueString()] {
-			diags.AddAttributeError(p, "Unbekannte Dimension",
-				fmt.Sprintf("%q ist keine Auswahl-Dimension des Rechte-Katalogs. Gemeint sind CT-Feldnamen "+
-					"wie crp_query, cc_html_template oder cdb_gruppe.", s.ValueString()))
-		}
-	}
-}
-
-// --- model <-> engine ---
-
-func specsFromSet(ctx context.Context, set types.Set) ([]grantSpec, diag.Diagnostics) {
-	var diags diag.Diagnostics
-	if set.IsNull() {
-		return nil, diags
-	}
-	var gs []grantModel
-	diags.Append(set.ElementsAs(ctx, &gs, false)...)
-	if diags.HasError() {
-		return nil, diags
-	}
-	out := make([]grantSpec, 0, len(gs))
-	for _, g := range gs {
-		s := grantSpec{Right: g.Right.ValueString(), Subgroups: g.AppliesToSubgroups.ValueBool()}
-		for _, a := range scopeAttrs {
-			v := *g.scope()[a]
-			if v.IsNull() {
-				continue
-			}
-			var ids []string
-			diags.Append(v.ElementsAs(ctx, &ids, false)...)
-			for _, id := range ids {
-				n, err := strconv.ParseInt(id, 10, 64)
-				if err != nil {
-					diags.AddError("Ungültige id", fmt.Sprintf("%s: %q ist keine Zahl", s.Right, id))
-					continue
-				}
-				s.IDs = append(s.IDs, n)
-			}
-		}
-		out = append(out, s)
-	}
-	return out, diags
-}
-
-func rowsFromSet(ctx context.Context, set types.Set) ([]grantRow, diag.Diagnostics) {
-	specs, diags := specsFromSet(ctx, set)
-	if diags.HasError() {
-		return nil, diags
-	}
-	rows, err := expandSpecs(specs)
-	if err != nil {
-		diags.AddError("Rechte konnten nicht aufgelöst werden", err.Error())
-	}
-	return rows, diags
-}
-
-func setFromRows(ctx context.Context, rows []grantRow) (types.Set, diag.Diagnostics) {
-	var diags diag.Diagnostics
-	specs := collapseRows(rows)
-	vals := make([]attr.Value, 0, len(specs))
-	for _, s := range specs {
-		g := grantModel{Right: types.StringValue(s.Right), AppliesToSubgroups: types.BoolNull()}
-		if s.Subgroups {
-			g.AppliesToSubgroups = types.BoolValue(true)
-		}
-		for _, a := range scopeAttrs {
-			*g.scope()[a] = types.SetNull(types.StringType)
-		}
-		if len(s.IDs) > 0 {
-			ids := make([]attr.Value, len(s.IDs))
-			for i, id := range s.IDs {
-				ids[i] = types.StringValue(strconv.FormatInt(id, 10))
-			}
-			a := scopeAttrFor(rightsCatalog.byName[s.Right])
-			if a == "" {
-				// A data row on a right the catalog calls unscoped. Should not happen;
-				// keep it visible rather than drop it.
-				a = rawDataIDsAttr
-			}
-			*g.scope()[a] = types.SetValueMust(types.StringType, ids)
-		}
-		o, d := types.ObjectValueFrom(ctx, grantAttrTypes, g)
-		diags.Append(d...)
-		vals = append(vals, o)
-	}
-	s, d := types.SetValue(grantObjectType, vals)
-	diags.Append(d...)
-	return s, diags
-}
-
-func preservedSet(rows []grantRow) types.Set {
-	sortRows(rows)
-	vals := make([]attr.Value, len(rows))
-	for i, r := range rows {
-		vals[i] = types.StringValue(r.String())
-	}
-	return types.SetValueMust(types.StringType, vals)
-}
-
-func preserveDims(set types.Set) map[string]bool {
-	m := map[string]bool{}
-	for _, e := range set.Elements() {
-		if s, ok := e.(types.String); ok && !s.IsNull() && !s.IsUnknown() {
-			m[s.ValueString()] = true
-		}
-	}
-	return m
+	validateGrants(ctx, groupRoleKind, m.Grants, &resp.Diagnostics)
 }
 
 // --- pairing ---
@@ -445,93 +162,12 @@ func (r *groupRoleResource) resolvePairing(ctx context.Context, groupID, role, i
 
 // --- CRUD ---
 
-// unofferedRows returns the `absent` rows (declared but not live) whose right
-// the host's right table does not offer. It asks the host, once per provider
-// instance, and only when something is absent. If the host cannot say, it
-// fails closed by skipping nothing: the rows then take the strict path (PUT,
-// read-back), which works for every right the host stores, so an unreadable
-// table never blocks an ordinary grant. The error is returned for messages.
-func (r *groupRoleResource) unofferedRows(ctx context.Context, absent []grantRow) ([]grantRow, error) {
-	if len(absent) == 0 {
-		return nil, nil
-	}
-	offered, err := r.client.OfferedAuthIDs(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("ob %s die Rechte %s anbietet, ließ sich nicht klären, daher wird nichts "+
-			"übersprungen: %w", r.client.BaseURL(), rowList(absent), err)
-	}
-	_, skipped := splitUnoffered(absent, offered)
-	return skipped, nil
-}
-
-func (r *groupRoleResource) warnSkipped(diags *diag.Diagnostics, groupID, role string, skipped []grantRow) {
-	if len(skipped) == 0 {
-		return
-	}
-	sortRows(skipped)
-	diags.AddWarning("Rechte auf dieser Instanz nicht angeboten",
-		fmt.Sprintf("Rolle %q in Gruppe %s: %s bietet diese Rechte nicht an (das zugehörige Modul ist dort nicht "+
-			"aktiv): %s. Sie werden auf dieser Instanz weder gesetzt noch entzogen; der Plan bleibt sauber.",
-			role, groupID, r.client.BaseURL(), rowList(skipped)))
-}
-
-// apply writes `desired` onto the pairing, revoking only rows of `prior`, then
-// reads back and returns the live rows plus the declared rows it skipped
-// because the host does not offer their right.
-func (r *groupRoleResource) apply(ctx context.Context, id string, prior, desired []grantRow) (after []client.PermissionRow, skipped []grantRow, err error) {
-	live, err := r.client.PermissionRows(ctx, groupRoleDomain, id)
-	if err != nil {
-		return nil, nil, err
-	}
-	// Only a declared row that is not stored yet can be one the host lacks;
-	// every other row proves its right is offered.
-	skipped, tableErr := r.unofferedRows(ctx, absentRows(desired, live))
-	if len(skipped) > 0 {
-		skip := rowSet(skipped)
-		var keep []grantRow
-		for _, d := range desired {
-			if !skip[d] {
-				keep = append(keep, d)
-			}
-		}
-		desired = keep
-	}
-	w, err := planGrantWrites(prior, desired, live)
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, d := range w.Deletes {
-		if err := r.client.DeletePermission(ctx, groupRoleDomain, id, d); err != nil {
-			return nil, nil, err
-		}
-	}
-	for _, p := range w.Puts {
-		if err := r.client.PutPermission(ctx, groupRoleDomain, id, p); err != nil {
-			return nil, nil, err
-		}
-	}
-	after, err = r.client.PermissionRows(ctx, groupRoleDomain, id)
-	if err != nil {
-		return nil, nil, fmt.Errorf("Rechte nach dem Schreiben nicht lesbar: %w", err)
-	}
-	// Rights the host offers keep the strict check: 204 without a stored row is an error.
-	if err := verifyGrantWrites(desired, removedRows(prior, desired), after); err != nil {
-		if tableErr != nil {
-			err = fmt.Errorf("%w %v", err, tableErr)
-		}
-		return nil, nil, err
-	}
-	return after, skipped, nil
-}
-
 func (r *groupRoleResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	if notConfigured(r.client, &resp.Diagnostics) {
 		return
 	}
 	var plan groupRoleModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
-	desired, d := rowsFromSet(ctx, plan.Grants)
-	resp.Diagnostics.Append(d...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -544,26 +180,12 @@ func (r *groupRoleResource) Create(ctx context.Context, req resource.CreateReque
 		resp.Diagnostics.AddError(summary, err.Error())
 		return
 	}
-	// Create never revokes: prior is empty. A live grant the config does not
-	// declare is kept by this apply and shows up as a removal in the NEXT plan,
-	// where an operator can see it — a create must not revoke silently.
-	after, skipped, err := r.apply(ctx, id, nil, desired)
-	if err != nil {
-		resp.Diagnostics.AddError(summary, err.Error())
+	d := plan.data()
+	if !r.svc().create(ctx, id, plan.label(plan.Role.ValueString()), summary, d, &resp.Diagnostics) {
 		return
 	}
-	r.warnSkipped(&resp.Diagnostics, plan.GroupID.ValueString(), plan.Role.ValueString(), skipped)
-	res := filterLiveRows(after, rowSet(desired), preserveDims(plan.PreserveUnknown))
-	if extra := removedRows(res.Managed, desired); len(extra) > 0 {
-		sortRows(extra)
-		resp.Diagnostics.AddWarning("Nicht deklarierte Rechte vorhanden",
-			fmt.Sprintf("Rolle %q in Gruppe %s hat Rechte, die nicht in der Konfiguration stehen: %s. "+
-				"Dieser Lauf hat sie nicht angefasst; der nächste Plan schlägt vor, sie zu entziehen. "+
-				"Übernimm sie in die Konfiguration oder nimm ihre Dimension in preserve_unknown auf.",
-				plan.Role.ValueString(), plan.GroupID.ValueString(), rowList(extra)))
-	}
+	plan.setData(d)
 	plan.ID = types.StringValue(id)
-	plan.PreservedGrants = preservedSet(res.Preserved)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
@@ -573,8 +195,6 @@ func (r *groupRoleResource) Read(ctx context.Context, req resource.ReadRequest, 
 	}
 	var state groupRoleModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	prior, d := rowsFromSet(ctx, state.Grants)
-	resp.Diagnostics.Append(d...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -587,40 +207,18 @@ func (r *groupRoleResource) Read(ctx context.Context, req resource.ReadRequest, 
 		resp.Diagnostics.AddError("Rollenrechte konnten nicht gelesen werden", err.Error())
 		return
 	}
-	live, err := r.client.PermissionRows(ctx, groupRoleDomain, id)
-	if err != nil {
-		resp.Diagnostics.AddError("Rollenrechte konnten nicht gelesen werden", err.Error())
+	d := state.data()
+	ok, gone := r.svc().read(ctx, id, state.label(role), "Rollenrechte konnten nicht gelesen werden", d, &resp.Diagnostics)
+	if gone {
+		resp.State.RemoveResource(ctx)
 		return
 	}
-	var declared map[grantRow]bool
-	if prior != nil {
-		declared = rowSet(prior)
+	if !ok {
+		return
 	}
-	res := filterLiveRows(live, declared, preserveDims(state.PreserveUnknown))
-	if len(res.Unknown) > 0 {
-		sortRows(res.Unknown)
-		resp.Diagnostics.AddWarning("Rechte außerhalb des Katalogs",
-			fmt.Sprintf("Rolle %q in Gruppe %s hat Rechte, deren authId der Rechte-Katalog (ChurchTools %s) "+
-				"nicht kennt: %s. Sie werden weder verwaltet noch entzogen.",
-				role, state.GroupID.ValueString(), rightsCatalog.version, rowList(res.Unknown)))
-	}
-	// A declared row the host does not offer is never live. Keep it in state as
-	// declared, or every plan would propose to add it again (and every apply
-	// would skip it again): that is the clean plan. Only the host's own right
-	// table can tell it from a row deleted in the UI, which stays drift.
-	skipped, err := r.unofferedRows(ctx, absentRows(prior, live))
-	if err != nil {
-		resp.Diagnostics.AddWarning("Rechte-Tabelle nicht lesbar", err.Error()+
-			" Fehlende Rechte erscheinen deshalb im Plan als hinzuzufügen.")
-	}
-	r.warnSkipped(&resp.Diagnostics, state.GroupID.ValueString(), role, skipped)
-	res.Managed = append(res.Managed, skipped...)
-	grants, d := setFromRows(ctx, res.Managed)
-	resp.Diagnostics.Append(d...)
+	state.setData(d)
 	state.ID = types.StringValue(id)
 	state.Role = types.StringValue(role)
-	state.Grants = grants
-	state.PreservedGrants = preservedSet(res.Preserved)
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }
 
@@ -631,96 +229,24 @@ func (r *groupRoleResource) Update(ctx context.Context, req resource.UpdateReque
 	var plan, state groupRoleModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	desired, d := rowsFromSet(ctx, plan.Grants)
-	resp.Diagnostics.Append(d...)
-	prior, d := rowsFromSet(ctx, state.Grants)
-	resp.Diagnostics.Append(d...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	id := state.ID.ValueString()
-	prior, adopted := adoptNewlyPreserved(prior, desired, preserveDims(state.PreserveUnknown), preserveDims(plan.PreserveUnknown))
-	if len(adopted) > 0 {
-		sortRows(adopted)
-		resp.Diagnostics.AddWarning("Rechte nicht entzogen",
-			fmt.Sprintf("Diese Rechte standen im Plan als Entzug, liegen aber auf einer Dimension, die dieser Lauf "+
-				"neu in preserve_unknown aufnimmt; sie bleiben bestehen und erscheinen unter preserved_grants: %s.",
-				rowList(adopted)))
-	}
-	after, skipped, err := r.apply(ctx, id, prior, desired)
-	if err != nil {
-		resp.Diagnostics.AddError("Rollenrechte konnten nicht geändert werden", err.Error())
+	pd := plan.data()
+	if !r.svc().update(ctx, state.ID.ValueString(), plan.label(plan.Role.ValueString()),
+		"Rollenrechte konnten nicht geändert werden", pd, state.data(), &resp.Diagnostics) {
 		return
 	}
-	r.warnSkipped(&resp.Diagnostics, plan.GroupID.ValueString(), plan.Role.ValueString(), skipped)
-	res := filterLiveRows(after, rowSet(desired), preserveDims(plan.PreserveUnknown))
-	plan.ID = types.StringValue(id)
-	// A known planned value came from preservedGrantsModifier and must be
-	// returned as planned; it can only differ when the UI changed the role
-	// between plan and apply, and the next refresh picks that up.
-	if plan.PreservedGrants.IsUnknown() {
-		plan.PreservedGrants = preservedSet(res.Preserved)
-	}
+	plan.setData(pd)
+	plan.ID = state.ID
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
-}
-
-// preservedGrantsModifier keeps preserved_grants from state on an update that
-// cannot change it, so a plan with a grant diff does not also show it as
-// "known after apply". The set can change on an update only when
-// preserve_unknown changes or the config starts declaring a preserved row;
-// then it stays unknown.
-type preservedGrantsModifier struct{}
-
-func (preservedGrantsModifier) Description(context.Context) string {
-	return "Keeps preserved_grants from state unless preserve_unknown changes or a preserved row is declared."
-}
-
-func (m preservedGrantsModifier) MarkdownDescription(ctx context.Context) string {
-	return m.Description(ctx)
-}
-
-func (preservedGrantsModifier) PlanModifySet(ctx context.Context, req planmodifier.SetRequest, resp *planmodifier.SetResponse) {
-	if req.StateValue.IsNull() || !req.PlanValue.IsUnknown() || req.Plan.Raw.IsNull() {
-		return
-	}
-	var plan, state groupRoleModel
-	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() || plan.PreserveUnknown.IsUnknown() || plan.Grants.IsUnknown() {
-		return
-	}
-	if !maps.Equal(preserveDims(plan.PreserveUnknown), preserveDims(state.PreserveUnknown)) {
-		return
-	}
-	if tv, err := plan.Grants.ToTerraformValue(ctx); err != nil || !tv.IsFullyKnown() {
-		return
-	}
-	desired, d := rowsFromSet(ctx, plan.Grants)
-	if d.HasError() {
-		return // ValidateConfig reports it
-	}
-	preserved := map[string]bool{}
-	for _, e := range req.StateValue.Elements() {
-		if s, ok := e.(types.String); ok {
-			preserved[s.ValueString()] = true
-		}
-	}
-	for _, r := range desired {
-		if preserved[r.String()] {
-			return
-		}
-	}
-	resp.PlanValue = req.StateValue
 }
 
 // Delete un-manages without revoking, like every resource here and like
 // removing a declaration in ct-cli. Revoking a role's grants is done by
 // removing the grant blocks first, which the plan shows row by row.
 func (r *groupRoleResource) Delete(_ context.Context, _ resource.DeleteRequest, resp *resource.DeleteResponse) {
-	resp.Diagnostics.AddWarning(orphanOnDeleteSummary,
-		"Die Rechte dieser Rolle werden von diesem Provider beim Entfernen der Ressource nicht entzogen. "+
-			"Die Ressource wurde nur aus dem Terraform-State entfernt; die Rechte gelten in ChurchTools weiter. "+
-			"Wer sie entziehen will, entfernt zuerst die grant-Blöcke und wendet das an.")
+	grantsDeleteWarning(&resp.Diagnostics, "dieser Rolle")
 }
 
 // ImportState takes `<group_id>/<role>` or `<group_id>/<role>/<dim>,<dim>`.
@@ -738,14 +264,7 @@ func (r *groupRoleResource) ImportState(ctx context.Context, req resource.Import
 	}
 	preserve := types.SetNull(types.StringType)
 	if len(parts) == 3 {
-		var vals []attr.Value
-		for _, dim := range strings.Split(parts[2], ",") {
-			if dim = strings.TrimSpace(dim); dim != "" {
-				vals = append(vals, types.StringValue(dim))
-			}
-		}
-		preserve = types.SetValueMust(types.StringType, vals)
-		validatePreserve(preserve, path.Root("preserve_unknown"), &resp.Diagnostics)
+		preserve = parsePreserveSuffix(parts[2], &resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -753,32 +272,4 @@ func (r *groupRoleResource) ImportState(ctx context.Context, req resource.Import
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("group_id"), parts[0])...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("role"), parts[1])...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("preserve_unknown"), preserve)...)
-}
-
-func rowList(rows []grantRow) string {
-	s := make([]string, len(rows))
-	for i, r := range rows {
-		s[i] = r.String()
-	}
-	return strings.Join(s, ", ")
-}
-
-// adoptNewlyPreserved takes out of `prior` the rows that are about to be
-// revoked only because they were in state before their dimension joined
-// preserve_unknown. Such a row reached state as an undeclared row (a pending
-// removal); adding its dimension to preserve_unknown is the operator saying
-// "leave those alone", so the apply must not revoke it on that very run.
-// Ambiguous case, resolved in the safe direction: a block removed in the same
-// change that adds its dimension is kept, not revoked.
-func adoptNewlyPreserved(prior, desired []grantRow, before, after map[string]bool) (kept, adopted []grantRow) {
-	want := rowSet(desired)
-	for _, p := range prior {
-		dim := rightsCatalog.byID[p.AuthID].ScopeField
-		if !want[p] && dim != "" && after[dim] && !before[dim] {
-			adopted = append(adopted, p)
-			continue
-		}
-		kept = append(kept, p)
-	}
-	return kept, adopted
 }

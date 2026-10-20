@@ -1,4 +1,4 @@
-package provider
+package grants
 
 import (
 	"os"
@@ -14,7 +14,7 @@ import (
 
 func fixture(t *testing.T, name string) []client.PermissionRow {
 	t.Helper()
-	raw, err := os.ReadFile("testdata/group_role/" + name + ".json")
+	raw, err := os.ReadFile("testdata/" + name + ".json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,11 +48,11 @@ const (
 )
 
 func TestCatalogEmbedded(t *testing.T) {
-	if len(rightsCatalog.byID) != 187 || rightsCatalog.version == "" {
-		t.Fatalf("catalog: %d rights, version %q", len(rightsCatalog.byID), rightsCatalog.version)
+	if len(Catalog.ByID) != 187 || Catalog.Version == "" {
+		t.Fatalf("catalog: %d rights, version %q", len(Catalog.ByID), Catalog.Version)
 	}
 	for _, d := range []string{"crp_query", "cc_html_template", "cdb_gruppe", "cc_securitylevel"} {
-		if !rightsCatalog.dimensions[d] {
+		if !Catalog.Dimensions[d] {
 			t.Errorf("dimension %s missing", d)
 		}
 	}
@@ -65,18 +65,18 @@ func TestFixturesRoundTrip(t *testing.T) {
 	for _, name := range []string{"14853_skidscheckinopsmz_mitglied", "16829_sll_koblenz_mitglied", "area_administration_leiter"} {
 		t.Run(name, func(t *testing.T) {
 			rows := fixture(t, name)
-			res := filterLiveRows(rows, nil, nil)
+			res := FilterLive(rows, nil, nil)
 			if len(res.Unknown) > 0 || len(res.Preserved) > 0 {
 				t.Fatalf("unknown %v preserved %v", res.Unknown, res.Preserved)
 			}
 			if len(res.Managed) != len(rows) {
 				t.Fatalf("managed %d of %d rows", len(res.Managed), len(rows))
 			}
-			back, err := expandSpecs(collapseRows(res.Managed))
+			back, err := ExpandSpecs(CollapseRows(res.Managed))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(rowSet(back), rowSet(res.Managed)) {
+			if !reflect.DeepEqual(RowSet(back), RowSet(res.Managed)) {
 				t.Fatalf("round trip changed rows:\n%v\n%v", back, res.Managed)
 			}
 		})
@@ -84,10 +84,10 @@ func TestFixturesRoundTrip(t *testing.T) {
 }
 
 func TestInheritedIsItsOwnBlock(t *testing.T) {
-	res := filterLiveRows(fixture(t, "14853_skidscheckinopsmz_mitglied"), nil, nil)
+	res := FilterLive(fixture(t, "14853_skidscheckinopsmz_mitglied"), nil, nil)
 	var direct, sub bool
 	var inheritedOnly bool
-	for _, s := range collapseRows(res.Managed) {
+	for _, s := range CollapseRows(res.Managed) {
 		if s.Right == "churchdb:+see persons" {
 			if s.Subgroups {
 				sub = true
@@ -113,11 +113,11 @@ func TestInheritedIsItsOwnBlock(t *testing.T) {
 func TestReadIsStable(t *testing.T) {
 	rows := append(fixture(t, "16829_sll_koblenz_mitglied"), live(viewQuery, i64(5), false))
 	preserve := map[string]bool{"crp_query": true}
-	var prev []grantSpec
-	declared := map[grantRow]bool{}
+	var prev []Spec
+	declared := map[Row]bool{}
 	for i := 0; i < 3; i++ {
-		res := filterLiveRows(rows, declared, preserve)
-		specs := collapseRows(res.Managed)
+		res := FilterLive(rows, declared, preserve)
+		specs := CollapseRows(res.Managed)
 		if i > 0 && !reflect.DeepEqual(specs, prev) {
 			t.Fatalf("pass %d differs:\n%v\n%v", i, specs, prev)
 		}
@@ -125,12 +125,12 @@ func TestReadIsStable(t *testing.T) {
 			t.Fatalf("pass %d: preserved %v", i, res.Preserved)
 		}
 		prev = specs
-		declared = rowSet(res.Managed)
+		declared = RowSet(res.Managed)
 	}
 }
 
 func TestFilterLiveRows(t *testing.T) {
-	declaredQuery := grantRow{AuthID: viewQuery, HasData: true, DataID: 1}
+	declaredQuery := Row{AuthID: viewQuery, HasData: true, DataID: 1}
 	rows := []client.PermissionRow{
 		live(viewAlldata, i64(2), false),                      // non-preserved, undeclared: managed
 		live(viewQuery, i64(1), false),                        // preserved dim, declared: managed
@@ -143,19 +143,19 @@ func TestFilterLiveRows(t *testing.T) {
 		live(999999, nil, false),                              // unknown authId
 		live(viewAlldata, i64(2), false),                      // duplicate
 	}
-	res := filterLiveRows(rows, map[grantRow]bool{declaredQuery: true}, map[string]bool{"crp_query": true})
-	want := readResult{
-		Managed: []grantRow{
+	res := FilterLive(rows, map[Row]bool{declaredQuery: true}, map[string]bool{"crp_query": true})
+	want := ReadResult{
+		Managed: []Row{
 			{AuthID: viewAlldata, HasData: true, DataID: 2},
 			declaredQuery,
 			{AuthID: useTemplates, HasData: true, DataID: 4},
 			{AuthID: adminTmpl},
 		},
-		Preserved: []grantRow{
+		Preserved: []Row{
 			{AuthID: viewQuery, HasData: true, DataID: 9},
 			{AuthID: viewQuery, HasData: true, DataID: 9, Subgroups: true},
 		},
-		Unknown: []grantRow{{AuthID: 999999}},
+		Unknown: []Row{{AuthID: 999999}},
 	}
 	if !reflect.DeepEqual(res, want) {
 		t.Fatalf("got  %+v\nwant %+v", res, want)
@@ -169,12 +169,12 @@ func TestFilterLiveRows(t *testing.T) {
 func TestUndeclaredPreservedNeverRevoked(t *testing.T) {
 	rows := append(fixture(t, "16829_sll_koblenz_mitglied"),
 		live(viewQuery, i64(7), false), live(viewQuery, nil, false))
-	desired := []grantRow{{AuthID: viewAlldata, HasData: true, DataID: 2}}
+	desired := []Row{{AuthID: viewAlldata, HasData: true, DataID: 2}}
 	preserve := map[string]bool{"crp_query": true}
 
-	res := filterLiveRows(rows, rowSet(desired), preserve)
-	planned := removedRows(res.Managed, desired)
-	if len(planned) != 1 || planned[0] != (grantRow{AuthID: 124, HasData: true, DataID: 24}) {
+	res := FilterLive(rows, RowSet(desired), preserve)
+	planned := RemovedRows(res.Managed, desired)
+	if len(planned) != 1 || planned[0] != (Row{AuthID: 124, HasData: true, DataID: 24}) {
 		t.Fatalf("planned removals %v, want only 124 [24]", planned)
 	}
 	for _, p := range res.Preserved {
@@ -183,7 +183,7 @@ func TestUndeclaredPreservedNeverRevoked(t *testing.T) {
 		}
 	}
 
-	w, err := planGrantWrites(res.Managed, desired, rows)
+	w, err := PlanWrites(res.Managed, desired, rows)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestUndeclaredPreservedNeverRevoked(t *testing.T) {
 	// Even a prior state that somehow held the preserved row cannot revoke the
 	// UNSCOPED-by-accident null row of a scoped right through a wide DELETE
 	// while selection rows exist.
-	_, err = planGrantWrites([]grantRow{{AuthID: viewQuery}}, nil, rows)
+	_, err = PlanWrites([]Row{{AuthID: viewQuery}}, nil, rows)
 	if err == nil || !strings.Contains(err.Error(), "Auswahl-Zeile") {
 		t.Fatalf("wide delete not refused: %v", err)
 	}
@@ -206,12 +206,12 @@ func TestUndeclaredPreservedNeverRevoked(t *testing.T) {
 // Without preserve_unknown the same undeclared crp_query row IS planned.
 func TestUndeclaredNonPreservedPlanned(t *testing.T) {
 	rows := []client.PermissionRow{live(viewQuery, i64(7), false), live(useTemplates, i64(3), false)}
-	res := filterLiveRows(rows, nil, map[string]bool{"cc_html_template": true})
-	planned := removedRows(res.Managed, nil)
+	res := FilterLive(rows, nil, map[string]bool{"cc_html_template": true})
+	planned := RemovedRows(res.Managed, nil)
 	if len(planned) != 1 || planned[0].AuthID != viewQuery {
 		t.Fatalf("planned %v, want only 702 [7]", planned)
 	}
-	w, err := planGrantWrites(res.Managed, nil, rows)
+	w, err := PlanWrites(res.Managed, nil, rows)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,13 +221,13 @@ func TestUndeclaredNonPreservedPlanned(t *testing.T) {
 }
 
 func TestPlanGrantWritesPuts(t *testing.T) {
-	desired := []grantRow{
+	desired := []Row{
 		{AuthID: viewAlldata, HasData: true, DataID: 2},
 		{AuthID: viewAlldata, HasData: true, DataID: 5},
 		{AuthID: viewAlldata, HasData: true, DataID: 5, Subgroups: true},
 		{AuthID: adminTmpl},
 	}
-	w, err := planGrantWrites(nil, desired, fixture(t, "16829_sll_koblenz_mitglied"))
+	w, err := PlanWrites(nil, desired, fixture(t, "16829_sll_koblenz_mitglied"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,37 +244,37 @@ func TestPlanGrantWritesPuts(t *testing.T) {
 func TestPlanGrantWritesGuards(t *testing.T) {
 	t.Run("deny is not flipped", func(t *testing.T) {
 		rows := []client.PermissionRow{{AuthID: viewAlldata, DataID: i64(2), Type: "revoke"}}
-		_, err := planGrantWrites(nil, []grantRow{{AuthID: viewAlldata, HasData: true, DataID: 2}}, rows)
+		_, err := PlanWrites(nil, []Row{{AuthID: viewAlldata, HasData: true, DataID: 2}}, rows)
 		if err == nil || !strings.Contains(err.Error(), "Verweigerung") {
 			t.Fatal(err)
 		}
 	})
 	t.Run("-1 swallows selections", func(t *testing.T) {
 		rows := []client.PermissionRow{live(viewAlldata, i64(-1), false)}
-		_, err := planGrantWrites(nil, []grantRow{{AuthID: viewAlldata, HasData: true, DataID: 2}}, rows)
+		_, err := PlanWrites(nil, []Row{{AuthID: viewAlldata, HasData: true, DataID: 2}}, rows)
 		if err == nil || !strings.Contains(err.Error(), "-1") {
 			t.Fatal(err)
 		}
 	})
 	t.Run("baseline never deleted", func(t *testing.T) {
 		row := baseline(live(seePersons, i64(1), false))
-		w, err := planGrantWrites([]grantRow{rowOf(row)}, nil, []client.PermissionRow{row})
+		w, err := PlanWrites([]Row{RowOf(row)}, nil, []client.PermissionRow{row})
 		if err != nil || len(w.Deletes) != 0 {
 			t.Fatalf("%v %+v", err, w.Deletes)
 		}
 	})
 	t.Run("null row alone deletes without dataId", func(t *testing.T) {
 		rows := []client.PermissionRow{live(adminTmpl, nil, false)}
-		w, err := planGrantWrites([]grantRow{{AuthID: adminTmpl}}, nil, rows)
+		w, err := PlanWrites([]Row{{AuthID: adminTmpl}}, nil, rows)
 		if err != nil || !reflect.DeepEqual(w.Deletes, []client.PermissionWrite{{AuthID: adminTmpl}}) {
 			t.Fatalf("%v %+v", err, w.Deletes)
 		}
 	})
 	t.Run("-1 narrowed to an id: delete -1, then put", func(t *testing.T) {
 		rows := []client.PermissionRow{live(viewAlldata, i64(-1), false)}
-		all := grantRow{AuthID: viewAlldata, HasData: true, DataID: -1}
-		two := grantRow{AuthID: viewAlldata, HasData: true, DataID: 2}
-		w, err := planGrantWrites([]grantRow{all}, []grantRow{two}, rows)
+		all := Row{AuthID: viewAlldata, HasData: true, DataID: -1}
+		two := Row{AuthID: viewAlldata, HasData: true, DataID: 2}
+		w, err := PlanWrites([]Row{all}, []Row{two}, rows)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -286,8 +286,8 @@ func TestPlanGrantWritesGuards(t *testing.T) {
 	})
 	t.Run("null row and its id rows removed together", func(t *testing.T) {
 		rows := []client.PermissionRow{live(viewAlldata, nil, false), live(viewAlldata, i64(5), false)}
-		prior := []grantRow{{AuthID: viewAlldata}, {AuthID: viewAlldata, HasData: true, DataID: 5}}
-		w, err := planGrantWrites(prior, nil, rows)
+		prior := []Row{{AuthID: viewAlldata}, {AuthID: viewAlldata, HasData: true, DataID: 5}}
+		w, err := PlanWrites(prior, nil, rows)
 		want := []client.PermissionWrite{{AuthID: viewAlldata, DataID: []int64{5}}, {AuthID: viewAlldata}}
 		if err != nil || !reflect.DeepEqual(w.Deletes, want) {
 			t.Fatalf("%v %+v", err, w.Deletes)
@@ -295,14 +295,14 @@ func TestPlanGrantWritesGuards(t *testing.T) {
 	})
 	t.Run("null row next to a kept id row is refused", func(t *testing.T) {
 		rows := []client.PermissionRow{live(viewAlldata, nil, false), live(viewAlldata, i64(5), false)}
-		prior := []grantRow{{AuthID: viewAlldata}, {AuthID: viewAlldata, HasData: true, DataID: 5}}
-		_, err := planGrantWrites(prior, prior[1:], rows)
+		prior := []Row{{AuthID: viewAlldata}, {AuthID: viewAlldata, HasData: true, DataID: 5}}
+		_, err := PlanWrites(prior, prior[1:], rows)
 		if err == nil || !strings.Contains(err.Error(), "einzeln") {
 			t.Fatal(err)
 		}
 	})
 	t.Run("gone already: nothing sent", func(t *testing.T) {
-		w, err := planGrantWrites([]grantRow{{AuthID: adminTmpl}}, nil, nil)
+		w, err := PlanWrites([]Row{{AuthID: adminTmpl}}, nil, nil)
 		if err != nil || len(w.Deletes) != 0 {
 			t.Fatalf("%v %+v", err, w.Deletes)
 		}
@@ -310,21 +310,21 @@ func TestPlanGrantWritesGuards(t *testing.T) {
 }
 
 func TestVerifyGrantWrites(t *testing.T) {
-	desired := []grantRow{{AuthID: 701}, {AuthID: viewAlldata, HasData: true, DataID: 2}}
-	err := verifyGrantWrites(desired, nil, fixture(t, "16829_sll_koblenz_mitglied"))
+	desired := []Row{{AuthID: 701}, {AuthID: viewAlldata, HasData: true, DataID: 2}}
+	err := VerifyWrites(desired, nil, fixture(t, "16829_sll_koblenz_mitglied"))
 	if err == nil || !strings.Contains(err.Error(), "churchreport:view") || !strings.Contains(err.Error(), "nicht gespeichert") {
 		t.Fatalf("missing 701 not reported: %v", err)
 	}
-	err = verifyGrantWrites(nil, []grantRow{{AuthID: 124, HasData: true, DataID: 24}}, fixture(t, "16829_sll_koblenz_mitglied"))
+	err = VerifyWrites(nil, []Row{{AuthID: 124, HasData: true, DataID: 24}}, fixture(t, "16829_sll_koblenz_mitglied"))
 	if err == nil || !strings.Contains(err.Error(), "noch vorhanden") {
 		t.Fatalf("stuck row not reported: %v", err)
 	}
-	if err := verifyGrantWrites([]grantRow{{AuthID: viewAlldata, HasData: true, DataID: 2}}, nil, fixture(t, "16829_sll_koblenz_mitglied")); err != nil {
+	if err := VerifyWrites([]Row{{AuthID: viewAlldata, HasData: true, DataID: 2}}, nil, fixture(t, "16829_sll_koblenz_mitglied")); err != nil {
 		t.Fatal(err)
 	} // A declared baseline row dropped from config is left in CT on purpose
-	// (planGrantWrites skips it), so the read-back must not call it stuck.
+	// (PlanWrites skips it), so the read-back must not call it stuck.
 	row := baseline(live(seePersons, i64(1), false))
-	if err := verifyGrantWrites(nil, []grantRow{rowOf(row)}, []client.PermissionRow{row}); err != nil {
+	if err := VerifyWrites(nil, []Row{RowOf(row)}, []client.PermissionRow{row}); err != nil {
 		t.Fatalf("baseline reported as stuck: %v", err)
 	}
 }

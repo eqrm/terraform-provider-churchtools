@@ -30,14 +30,14 @@ type PermRow struct {
 	ModifiedPid int64  `json:"-"`
 }
 
-func (r PermRow) wire(domainID string) map[string]any {
+func (r PermRow) wire(domainType, domainID string) map[string]any {
 	var data any
 	if r.DataID != nil {
 		data = *r.DataID
 	}
 	id, _ := strconv.Atoi(domainID)
 	return map[string]any{
-		"domainType": "group_role", "domainId": id, "authId": r.AuthID, "dataId": data,
+		"domainType": domainType, "domainId": id, "authId": r.AuthID, "dataId": data,
 		"isInherited": r.IsInherited, "type": r.Type, "reason": nil,
 		"meta": map[string]any{"modifiedDate": "2026-10-19T10:00:00Z", "modifiedPid": r.ModifiedPid},
 	}
@@ -63,6 +63,55 @@ func (s *Server) perms() *permState {
 		s.perm = &permState{groupRoles: map[string][]map[string]any{}, rows: map[string][]PermRow{}, inactive: map[int64]bool{}}
 	}
 	return s.perm
+}
+
+// permDomains are the permission domains the mock serves. group_role is keyed
+// by the bare pairing id (the original tests do), the others by "domain/id".
+var permDomains = map[string]bool{"group_role": true, "group_type_role": true, "status": true}
+
+func permKey(domainType, id string) string {
+	if domainType == "group_role" {
+		return id
+	}
+	return domainType + "/" + id
+}
+
+// domainExists: a type-level domain is the role's own id, a status domain the
+// status' id, so both exist exactly as long as that row does (CT 404s on any
+// other id). Caller holds s.mu.
+func (s *Server) domainExists(domainType, id string) bool {
+	switch domainType {
+	case "group_type_role":
+		_, ok := s.rows["/group/roles"][id]
+		return ok
+	case "status":
+		_, ok := s.rows["/statuses"][id]
+		return ok
+	}
+	return false
+}
+
+// SeedDomainPermissions replaces the stored rows of a group_type_role or status
+// domain.
+func (s *Server) SeedDomainPermissions(domainType string, id int, rows []PermRow) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.perms().rows[permKey(domainType, strconv.Itoa(id))] = append([]PermRow(nil), rows...)
+}
+
+// AddDomainPermission adds one row as an admin would in the UI.
+func (s *Server) AddDomainPermission(domainType string, id int, row PermRow) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := permKey(domainType, strconv.Itoa(id))
+	s.perms().rows[k] = append(s.perms().rows[k], row)
+}
+
+// DomainPermissions returns the stored rows of a group_type_role or status domain.
+func (s *Server) DomainPermissions(domainType string, id int) []PermRow {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]PermRow(nil), s.perms().rows[permKey(domainType, strconv.Itoa(id))]...)
 }
 
 // SeedGroupRoles installs a group's role list: name -> pairing id.
@@ -190,13 +239,18 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) bool 
 		}
 		writeData(w, rows)
 		return true
-	case len(parts) == 3 && parts[0] == "permissions" && parts[1] == "group_role":
+	case len(parts) == 3 && parts[0] == "permissions" && permDomains[parts[1]]:
 	default:
 		return false
 	}
 
+	domainType := parts[1]
 	id := parts[2]
-	stored, ok := ps.rows[id]
+	key := permKey(domainType, id)
+	stored, ok := ps.rows[key]
+	if !ok && s.domainExists(domainType, id) {
+		ok = true
+	}
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
 		writeData(w, map[string]any{"message": "domain not found"})
@@ -209,7 +263,7 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) bool 
 			if ps.inactive[row.AuthID] {
 				continue
 			}
-			out = append(out, row.wire(id))
+			out = append(out, row.wire(domainType, id))
 		}
 		writeData(w, out)
 		return true
@@ -244,7 +298,7 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) bool 
 				kept = append(kept, row)
 			}
 		}
-		ps.rows[id] = kept
+		ps.rows[key] = kept
 		w.WriteHeader(http.StatusNoContent)
 		return true
 	}
@@ -252,6 +306,13 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) bool 
 	typ := body.Type
 	if typ == "" {
 		typ = "grant"
+	}
+	if typ == "revoke" && domainType != "group_role" {
+		// CT: "revoke is only supported for group_role". Removing a row on the
+		// other domains is a DELETE, never a deny row.
+		w.WriteHeader(http.StatusBadRequest)
+		writeData(w, map[string]any{"message": "revoke is only supported for group_role"})
+		return true
 	}
 	if ps.dropped[auth] {
 		// a host that OFFERS the right yet does not store this write (a bug, a
@@ -261,7 +322,7 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) bool 
 	}
 	if ps.inactive[auth] {
 		// accepted, stored where no GET will ever show it: like CT.
-		ps.rows[id] = append(stored, PermRow{AuthID: auth, IsInherited: body.IsInherited, Type: typ, ModifiedPid: 1})
+		ps.rows[key] = append(stored, PermRow{AuthID: auth, IsInherited: body.IsInherited, Type: typ, ModifiedPid: 1})
 		w.WriteHeader(http.StatusNoContent)
 		return true
 	}
@@ -282,7 +343,7 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) bool 
 			}
 		}
 	}
-	ps.rows[id] = stored
+	ps.rows[key] = stored
 	w.WriteHeader(http.StatusNoContent)
 	return true
 }

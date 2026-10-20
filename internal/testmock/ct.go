@@ -43,6 +43,12 @@ type Server struct {
 	ignoreOnPut map[string]map[string]bool
 	// perm holds the permission routes' state (permissions.go).
 	perm *permState
+	// roleMembers makes DELETE /group/roles/{id} answer 409 (roles.go).
+	roleMembers map[string]int
+	roleDeletes int
+	// failNextRoleGet and roleGetHook: see roles.go.
+	failNextRoleGet bool
+	roleGetHook     func(row map[string]any)
 	// members and lastTypePost back the group type migration routes (grouptype.go).
 	members         map[string][]int
 	lastTypePost    map[string]map[string]any
@@ -376,12 +382,18 @@ var supportedVerbs = map[string]map[string]bool{
 		http.MethodPatch:  true,
 		http.MethodDelete: true,
 	},
-	// Roles of all group types (id, name, groupTypeId, type, isDefault), read-only.
-	"/group/roles": {http.MethodGet: true},
 	// Data fields. Measured on eqrm-dev (CT 3.137) on 2026-09-29: PATCH answers
 	// "Must be one of: GET, PUT, DELETE", and PUT replaces (see putRequired).
 	"/dbfields": {
 		http.MethodGet:    true,
+		http.MethodPut:    true,
+		http.MethodDelete: true,
+	},
+	// Group-type role definitions (CT 3.137 OpenAPI): GET list, POST 201, PUT 204
+	// with no body, DELETE 204 or 409 with a deletion report. See roles.go.
+	"/group/roles": {
+		http.MethodGet:    true,
+		http.MethodPost:   true,
 		http.MethodPut:    true,
 		http.MethodDelete: true,
 	},
@@ -527,6 +539,10 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 
 	if s.rows[collection] == nil {
 		s.rows[collection] = map[string]any{}
+	}
+
+	if collection == "/group/roles" && s.handleRoleWrite(w, r, id) {
+		return
 	}
 
 	switch {
