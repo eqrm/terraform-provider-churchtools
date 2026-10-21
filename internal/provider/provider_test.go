@@ -2,14 +2,26 @@ package provider
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/eqrm/terraform-provider-churchtools/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
+
+// The suites talk to an in-process mock that has no rate limit, so the default
+// 10 req/s spacing would only make them minutes slower.
+func TestMain(m *testing.M) {
+	if os.Getenv(MaxRequestsPerSecondEnv) == "" {
+		os.Setenv(MaxRequestsPerSecondEnv, "0")
+	}
+	os.Exit(m.Run())
+}
 
 func TestProvider_Schema(t *testing.T) {
 	var resp provider.SchemaResponse
@@ -18,7 +30,7 @@ func TestProvider_Schema(t *testing.T) {
 	if resp.Diagnostics.HasError() {
 		t.Fatalf("schema returned diagnostics: %v", resp.Diagnostics)
 	}
-	for _, name := range []string{"host", "token", "session_cookie", "csrf_token"} {
+	for _, name := range []string{"host", "token", "session_cookie", "csrf_token", "max_requests_per_second"} {
 		if _, ok := resp.Schema.Attributes[name]; !ok {
 			t.Errorf("missing provider attribute %q", name)
 		}
@@ -71,12 +83,16 @@ func configureWith(t *testing.T, host, token, cookie, csrf string) (*ProviderDat
 		"token":          tftypes.String,
 		"session_cookie": tftypes.String,
 		"csrf_token":     tftypes.String,
+
+		"max_requests_per_second": tftypes.Number,
 	}
 	raw := tftypes.NewValue(tftypes.Object{AttributeTypes: attrTypes}, map[string]tftypes.Value{
 		"host":           tftypes.NewValue(tftypes.String, host),
 		"token":          tftypes.NewValue(tftypes.String, token),
 		"session_cookie": tftypes.NewValue(tftypes.String, cookie),
 		"csrf_token":     tftypes.NewValue(tftypes.String, csrf),
+
+		"max_requests_per_second": tftypes.NewValue(tftypes.Number, nil),
 	})
 
 	var resp provider.ConfigureResponse
@@ -140,12 +156,16 @@ func TestConfigure_DefersOnUnknownCredential(t *testing.T) {
 		"token":          tftypes.String,
 		"session_cookie": tftypes.String,
 		"csrf_token":     tftypes.String,
+
+		"max_requests_per_second": tftypes.Number,
 	}
 	raw := tftypes.NewValue(tftypes.Object{AttributeTypes: attrTypes}, map[string]tftypes.Value{
 		"host":           tftypes.NewValue(tftypes.String, testHost),
 		"token":          tftypes.NewValue(tftypes.String, ""),
 		"session_cookie": tftypes.NewValue(tftypes.String, tftypes.UnknownValue),
 		"csrf_token":     tftypes.NewValue(tftypes.String, tftypes.UnknownValue),
+
+		"max_requests_per_second": tftypes.NewValue(tftypes.Number, nil),
 	})
 
 	var resp provider.ConfigureResponse
@@ -157,5 +177,27 @@ func TestConfigure_DefersOnUnknownCredential(t *testing.T) {
 	}
 	if resp.ResourceData != nil {
 		t.Error("no client should be built from an unknown credential")
+	}
+}
+
+// The request rate: attribute beats env var beats the default; garbage is refused.
+func TestMaxRequestsPerSecond(t *testing.T) {
+	t.Setenv(MaxRequestsPerSecondEnv, "")
+	if v, msg := maxRequestsPerSecond(types.Float64Null()); msg != "" || v != client.DefaultMaxRequestsPerSecond {
+		t.Errorf("default = %v %q, want %v", v, msg, client.DefaultMaxRequestsPerSecond)
+	}
+	t.Setenv(MaxRequestsPerSecondEnv, "4")
+	if v, _ := maxRequestsPerSecond(types.Float64Null()); v != 4 {
+		t.Errorf("env = %v, want 4", v)
+	}
+	if v, _ := maxRequestsPerSecond(types.Float64Value(2)); v != 2 {
+		t.Errorf("attribute = %v, want 2 (beats env)", v)
+	}
+	if _, msg := maxRequestsPerSecond(types.Float64Value(-1)); msg == "" {
+		t.Error("negative attribute accepted")
+	}
+	t.Setenv(MaxRequestsPerSecondEnv, "fast")
+	if _, msg := maxRequestsPerSecond(types.Float64Null()); msg == "" {
+		t.Error("garbage env accepted")
 	}
 }

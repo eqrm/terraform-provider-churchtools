@@ -184,6 +184,9 @@ func (c *Client) handshakeGet(ctx context.Context, target, cookie, label string)
 		if cookie != "" {
 			req.Header.Set("Cookie", cookie)
 		}
+		if err := c.pace.wait(ctx); err != nil {
+			return nil, nil, err
+		}
 		resp, err := c.http.Do(req)
 		if err != nil {
 			return nil, nil, redactErr(err)
@@ -198,7 +201,9 @@ func (c *Client) handshakeGet(ctx context.Context, target, cookie, label string)
 				return nil, nil, definitiveErr{fmt.Errorf("rate-limited (429) %d times in a row; "+
 					"ChurchTools is refusing logins, try again later: %w", attempt, se)}
 			}
-			t := time.NewTimer(retryAfter(resp.Header.Get("Retry-After"), handshakeBackoff<<(attempt-1)))
+			wait := retryAfter(resp.Header.Get("Retry-After"), handshakeBackoff<<(attempt-1))
+			c.pace.pauseFor(wait)
+			t := time.NewTimer(wait)
 			select {
 			case <-t.C:
 			case <-ctx.Done():
@@ -219,6 +224,11 @@ func (c *Client) handshakeGet(ctx context.Context, target, cookie, label string)
 // retryAfter reads a Retry-After header (seconds or HTTP date), falling back to
 // `def`, and caps the result.
 func retryAfter(h string, def time.Duration) time.Duration {
+	return retryAfterMax(h, def, handshakeMaxWait)
+}
+
+// retryAfterMax is retryAfter with an explicit cap.
+func retryAfterMax(h string, def, max time.Duration) time.Duration {
 	d := def
 	if h = strings.TrimSpace(h); h != "" {
 		if secs, err := strconv.Atoi(h); err == nil && secs >= 0 {
@@ -230,8 +240,8 @@ func retryAfter(h string, def time.Duration) time.Duration {
 	if d < 0 {
 		d = 0
 	}
-	if d > handshakeMaxWait {
-		d = handshakeMaxWait
+	if d > max {
+		d = max
 	}
 	return d
 }
@@ -279,21 +289,17 @@ func (c *Client) AjaxJSON(ctx context.Context, module string, params map[string]
 
 	endpoint := fmt.Sprintf("%s/index.php?q=%s/ajax", c.baseURL, module)
 	post := func(cookie, csrf string) (int, []byte, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
-		if err != nil {
-			return 0, nil, err
-		}
-		req.Header.Set("Accept", "application/json")
-		req.Header.Set("Cookie", cookie)
-		req.Header.Set("CSRF-Token", csrf)
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		resp, err := c.http.Do(req)
-		if err != nil {
-			return 0, nil, err
-		}
-		defer resp.Body.Close()
-		raw, err := io.ReadAll(resp.Body)
-		return resp.StatusCode, raw, err
+		return c.send(ctx, func() (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Accept", "application/json")
+			req.Header.Set("Cookie", cookie)
+			req.Header.Set("CSRF-Token", csrf)
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			return req, nil
+		})
 	}
 	status, raw, err := post(cookie, csrf)
 	if err != nil {

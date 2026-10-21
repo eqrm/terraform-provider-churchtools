@@ -28,7 +28,7 @@ flowchart TB
 
 | Block | Responsibility |
 |---|---|
-| `internal/provider` | Provider schema (`host`, `token`, `session_cookie`, `csrf_token`), validation, resources. One shared `*client.Client` is passed to all resources via `ProviderData`, because the framework creates a fresh resource per RPC and would otherwise lose the legacy session. |
+| `internal/provider` | Provider schema (`host`, `token`, `session_cookie`, `csrf_token`, `max_requests_per_second`), validation, resources. One shared `*client.Client` is passed to all resources via `ProviderData`, because the framework creates a fresh resource per RPC and would otherwise lose the legacy session. |
 | `internal/client` | Untyped REST transport (`Row = map[string]any`), pagination, 401 handling, legacy session and master-data writes. |
 | `internal/testmock` | HTTP fake with a verb allowlist per collection; seeds rows by id. |
 | `testdata/` | Synthetic ct-cli state files for the golden tests. |
