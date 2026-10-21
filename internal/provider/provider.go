@@ -7,7 +7,10 @@ package provider
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/eqrm/terraform-provider-churchtools/internal/client"
@@ -40,6 +43,32 @@ type providerModel struct {
 	Token         types.String `tfsdk:"token"`
 	SessionCookie types.String `tfsdk:"session_cookie"`
 	CSRFToken     types.String `tfsdk:"csrf_token"`
+
+	MaxRequestsPerSecond types.Float64 `tfsdk:"max_requests_per_second"`
+}
+
+// MaxRequestsPerSecondEnv overrides the default request rate when the
+// max_requests_per_second attribute is not set.
+const MaxRequestsPerSecondEnv = "CHURCHTOOLS_MAX_REQUESTS_PER_SECOND"
+
+// maxRequestsPerSecond resolves the request rate: attribute, then env var, then
+// the client default. 0 means "do not space requests".
+func maxRequestsPerSecond(cfg types.Float64) (float64, string) {
+	if !cfg.IsNull() {
+		v := cfg.ValueFloat64()
+		if v < 0 {
+			return 0, "max_requests_per_second darf nicht negativ sein (0 schaltet die Drosselung ab)"
+		}
+		return v, ""
+	}
+	if raw := strings.TrimSpace(os.Getenv(MaxRequestsPerSecondEnv)); raw != "" {
+		v, err := strconv.ParseFloat(raw, 64)
+		if err != nil || v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+			return 0, fmt.Sprintf("%s muss eine Zahl >= 0 sein (bekommen: %q)", MaxRequestsPerSecondEnv, raw)
+		}
+		return v, ""
+	}
+	return client.DefaultMaxRequestsPerSecond, ""
 }
 
 func New(version string) func() provider.Provider {
@@ -76,6 +105,16 @@ func (p *churchtoolsProvider) Schema(_ context.Context, _ provider.SchemaRequest
 				Description: "The CSRF token belonging to session_cookie, as emitted by " +
 					"`ct auth token`. Set together with session_cookie, instead of token.",
 			},
+			"max_requests_per_second": schema.Float64Attribute{
+				Optional: true,
+				Description: "Upper bound on ChurchTools requests started per second, shared by all " +
+					"resources of this provider (Terraform's parallelism cannot burst past it). " +
+					"Default 10, the value ct-cli uses; ChurchTools publishes no official limit. " +
+					"0 switches the spacing off. Can also be set with the " + MaxRequestsPerSecondEnv +
+					" environment variable; the attribute wins. Independently of this, an HTTP 429 " +
+					"is retried up to 6 times, honouring Retry-After (each wait capped at 60s) with " +
+					"exponential backoff, and pauses all requests while it lasts.",
+			},
 		},
 	}
 }
@@ -92,11 +131,18 @@ func (p *churchtoolsProvider) Configure(ctx context.Context, req provider.Config
 	// token`. The framework calls Configure anyway, so defer instead of
 	// reporting a spurious config error.
 	if cfg.Host.IsUnknown() || cfg.Token.IsUnknown() ||
-		cfg.SessionCookie.IsUnknown() || cfg.CSRFToken.IsUnknown() {
+		cfg.SessionCookie.IsUnknown() || cfg.CSRFToken.IsUnknown() ||
+		cfg.MaxRequestsPerSecond.IsUnknown() {
 		return
 	}
 	if msg := validateHost(cfg.Host.ValueString()); msg != "" {
 		resp.Diagnostics.AddAttributeError(path.Root("host"), "Ungueltiger ChurchTools-Host", msg)
+	}
+
+	rps, rpsErr := maxRequestsPerSecond(cfg.MaxRequestsPerSecond)
+	if rpsErr != "" {
+		resp.Diagnostics.AddAttributeError(path.Root("max_requests_per_second"),
+			"Ungueltige Anfragerate", rpsErr)
 	}
 
 	token := strings.TrimSpace(cfg.Token.ValueString())
@@ -135,6 +181,8 @@ func (p *churchtoolsProvider) Configure(ctx context.Context, req provider.Config
 	if token == "" {
 		api = client.NewWithSession(host, cookie, csrf)
 	}
+
+	api.SetMaxRequestsPerSecond(rps)
 
 	data := &ProviderData{Host: host, Client: api}
 	resp.ResourceData = data

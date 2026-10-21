@@ -50,6 +50,11 @@ type Client struct {
 	token   string
 	http    *http.Client
 
+	// Shared request pacer and 429 retry base, see pacer.go. New builds it
+	// without spacing; the provider turns spacing on.
+	pace      *pacer
+	retryBase time.Duration
+
 	// A session supplied by the OPERATOR rather than bought with a token (see
 	// NewWithSession). Written once at construction and never again, so unlike
 	// the lazily acquired pair below these need no mutex -- and must not be
@@ -103,6 +108,7 @@ func New(baseURL, token string) *Client {
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   token,
 		http:    &http.Client{Timeout: 30 * time.Second},
+		pace:    newPacer(0),
 
 		sessionSem: make(chan struct{}, 1),
 	}
@@ -126,6 +132,7 @@ func NewWithSession(baseURL, cookie, csrf string) *Client {
 		fixedCookie: cookie,
 		fixedCSRF:   csrf,
 		http:        &http.Client{Timeout: 30 * time.Second},
+		pace:        newPacer(0),
 	}
 }
 
@@ -240,29 +247,22 @@ func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte,
 // roundTrip performs one authenticated REST request and returns the status and
 // body without judging them.
 func (c *Client) roundTrip(ctx context.Context, method, path string, payload []byte, cookie, csrf string) (int, []byte, error) {
-	var buf io.Reader
-	if payload != nil {
-		buf = bytes.NewReader(payload)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+"/api"+path, buf)
-	if err != nil {
-		return 0, nil, err
-	}
-	setAuth(req, method, cookie, csrf)
-	req.Header.Set("Accept", "application/json")
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, nil, err
-	}
-	return resp.StatusCode, raw, nil
+	return c.send(ctx, func() (*http.Request, error) {
+		var buf io.Reader
+		if payload != nil {
+			buf = bytes.NewReader(payload)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, c.baseURL+"/api"+path, buf)
+		if err != nil {
+			return nil, err
+		}
+		setAuth(req, method, cookie, csrf)
+		req.Header.Set("Accept", "application/json")
+		if payload != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		return req, nil
+	})
 }
 
 // doItem is do for a path that addresses ONE row. It refuses an empty id and is

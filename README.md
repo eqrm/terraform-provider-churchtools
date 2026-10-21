@@ -335,6 +335,34 @@ Set exactly one of the two. Supplying both is an error rather than a precedence
 rule: an author who thinks the credential they just added is the live one, and
 is wrong, authenticates as the wrong identity with nothing to tell them so.
 
+## Rate limiting
+
+ChurchTools answers too many requests with HTTP 429 and publishes no number for
+its limit. Terraform applies resources in parallel (default `-parallelism=10`)
+and a resource such as `churchtools_group_type_role` issues one request per
+grant row, so an unpaced apply bursts hundreds of calls (eqrm/ct-structure run
+39580441996 hit 429 on 12 roles that way). The provider therefore:
+
+- **Spaces requests.** All resources share one client, which starts at most
+  `max_requests_per_second` requests per second (default `10`, the value the
+  sibling ct-cli settled on). `0` switches the spacing off. The environment
+  variable `CHURCHTOOLS_MAX_REQUESTS_PER_SECOND` sets the same when the attribute
+  is absent; the attribute wins.
+- **Retries 429.** Up to 6 retries, waiting the `Retry-After` header when sent,
+  else 0.5s doubling (plus jitter); each wait is capped at 60s and honours
+  context cancellation. A 429 also pauses *every* request of the client for that
+  wait, so parallel resources do not each retry into the wall. After the last
+  retry the error says so. A 429 is retried for every method, creates included,
+  because ChurchTools rejects the request before processing it. 5xx and network
+  errors are never retried: a write may already have been applied.
+
+```hcl
+provider "churchtools" {
+  host                    = "https://example.church.tools"
+  max_requests_per_second = 5 # optional
+}
+```
+
 ## Local development
 
 Build and point OpenTofu at the local binary:
