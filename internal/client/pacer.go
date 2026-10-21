@@ -90,19 +90,33 @@ func (p *pacer) pauseFor(d time.Duration) {
 	}
 }
 
-// wait blocks until this caller may start a request, or ctx is done.
-func (p *pacer) wait(ctx context.Context) error {
-	d := p.reserve()
-	if d <= 0 {
-		return ctx.Err()
+// paused reports whether a 429 pause is still running.
+func (p *pacer) paused() bool {
+	if p == nil {
+		return false
 	}
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-t.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.pausedUntil.After(time.Now())
+}
+
+// wait blocks until this caller may start a request, or ctx is done. A pause
+// that began while it slept on its slot sends it back for a slot after the
+// pause, so siblings queued before a 429 do not fire into it.
+func (p *pacer) wait(ctx context.Context) error {
+	for {
+		if d := p.reserve(); d > 0 {
+			t := time.NewTimer(d)
+			select {
+			case <-t.C:
+			case <-ctx.Done():
+				t.Stop()
+				return ctx.Err()
+			}
+		}
+		if err := ctx.Err(); err != nil || !p.paused() {
+			return err
+		}
 	}
 }
 
@@ -145,16 +159,16 @@ func (c *Client) send(ctx context.Context, build func() (*http.Request, error)) 
 		if resp.StatusCode != http.StatusTooManyRequests {
 			return resp.StatusCode, raw, rerr
 		}
+		backoff := base << attempt
+		backoff += time.Duration(rand.Int64N(int64(rateLimitJitterMax)))
+		d := retryAfterMax(resp.Header.Get("Retry-After"), backoff, rateLimitMaxWait)
+		c.pace.pauseFor(d) // also on the last attempt: siblings still need the pause
 		if attempt >= rateLimitRetries {
 			return 0, nil, fmt.Errorf("%w: %s %s still refused after %d retries; ChurchTools is "+
 				"throttling this client, lower max_requests_per_second or retry later: %w",
 				ErrRateLimited, req.Method, req.URL.Path, rateLimitRetries,
 				&StatusError{Method: req.Method, Path: req.URL.Path, Status: resp.StatusCode, Body: string(raw)})
 		}
-		backoff := base << attempt
-		backoff += time.Duration(rand.Int64N(int64(rateLimitJitterMax)))
-		d := retryAfterMax(resp.Header.Get("Retry-After"), backoff, rateLimitMaxWait)
-		c.pace.pauseFor(d)
 		// The next loop's pace.wait sleeps through the pause (ctx-aware).
 	}
 }

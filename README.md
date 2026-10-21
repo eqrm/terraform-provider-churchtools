@@ -70,6 +70,12 @@ with a ct-cli cookie). The mock models expiry as 401 on REST and as `200
 the provider renews once. ChurchTools answers a lapsed session on `/groups`
 with 403, not 401, so there is no renewal there and the read fails closed.
 
+The 429 handling (request pacing, Retry-After, shared pause) is verified only
+against `httptest` servers in `internal/client/pacer_test.go`; the mock has no
+rate limit. Live ChurchTools does answer 429 under a parallel apply, but whether
+it ever applies a throttled POST before refusing it is assumed (as ct-cli does),
+not tested. If it did, a retried create could duplicate a row.
+
 Worth stating plainly, because "it has tests" and "its writes work" are different
 claims here.
 

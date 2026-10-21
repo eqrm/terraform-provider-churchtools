@@ -164,3 +164,27 @@ func TestRetry_5xxIsNotRetried(t *testing.T) {
 		t.Errorf("hits = %d, want 1", hits.Load())
 	}
 }
+
+// A 429 that arrives while siblings already sleep on a reserved slot must hold
+// them back too, not only requests that reserve after it.
+func TestPacer_PauseHoldsBackReservedSleepers(t *testing.T) {
+	p := newPacer(10) // one start per 100ms
+	p.wait(context.Background())
+
+	const n = 4
+	start := time.Now()
+	woke := make(chan time.Duration, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			p.wait(context.Background())
+			woke <- time.Since(start)
+		}()
+	}
+	time.Sleep(50 * time.Millisecond) // all n hold a slot 100..400ms out
+	p.pauseFor(600 * time.Millisecond)
+	for i := 0; i < n; i++ {
+		if d := <-woke; d < 600*time.Millisecond {
+			t.Errorf("sleeper started %v after the burst, inside the 650ms pause", d)
+		}
+	}
+}
