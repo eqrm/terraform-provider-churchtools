@@ -1,0 +1,1 @@
+{"description":"x","process":{"k":"9"},"query":{"method":"ChurchQuery","params":{"filter":{"oneof":[{"var":"a"},[1,2]]}}}}

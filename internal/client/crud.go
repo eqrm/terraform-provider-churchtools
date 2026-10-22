@@ -1,7 +1,9 @@
 package client
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -97,5 +99,40 @@ func (c *Client) Delete(ctx context.Context, collection, id string) error {
 // an empty body, so there is no row to decode.
 func (c *Client) Post(ctx context.Context, path string, body any) error {
 	_, err := c.do(ctx, http.MethodPost, path, body)
+	return err
+}
+
+// GetJSON reads an endpoint whose body is not a row: the dynamic-group ruleset
+// (a single-element array) and status. Numbers stay json.Number, so ids above
+// 2^53 and the int/float spelling survive. ct-cli unwraps `.data ?? body`; so
+// does this, because the live envelope for these two endpoints is unmeasured by
+// the provider. A 404 is returned as a *StatusError (the path names the group, so
+// the caller decides whether that means "no ruleset").
+func (c *Client) GetJSON(ctx context.Context, path string) (any, error) {
+	raw, err := c.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if err := dec.Decode(&v); err != nil {
+		return nil, fmt.Errorf("churchtools: decoding GET %s: %w", path, err)
+	}
+	if m, ok := v.(map[string]any); ok {
+		if d, has := m["data"]; has && d != nil {
+			return d, nil
+		}
+	}
+	return v, nil
+}
+
+// Put sends a PUT to an action path that is not a collection item and ignores
+// the reply body (PUT /dynamicgroups/{id}/ruleset and /status).
+func (c *Client) Put(ctx context.Context, path string, body any) error {
+	_, err := c.do(ctx, http.MethodPut, path, body)
 	return err
 }

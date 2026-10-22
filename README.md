@@ -36,7 +36,9 @@ shared with `group_role`): `group_role_definition` (the role of a group type
 itself, `/group/roles`), `group_type_role` (its type-level grants,
 `/permissions/group_type_role/{roleId}`) and `person_status_grants` (the `status`
 permission domain). Their basic write paths ran live on dev once; see below.
-Dynamic groups follow in a later change.
+`dynamic_group` (the ruleset and status of one group, with `__ctRef` markers resolved
+through a `refs` map) is the last piece of tier 3; see the example in
+[`examples/resources/churchtools_dynamic_group`](examples/resources/churchtools_dynamic_group/resource.tf).
 
 Nothing is ever deleted in ChurchTools. Every resource's `Delete`
 **un-manages** the object instead: it drops it from state, leaves it untouched
@@ -127,6 +129,16 @@ doesn't hold. The read-back ran live on eqrm-dev on 2026-10-02: `is_active = fal
 on job (19) failed with that error and left field and state at `true`, and an
 `is_new_person_field` toggle of field 32 passed it both ways and was restored. A
 successful `is_active` toggle has not run live yet.
+
+`dynamic_group` (`/dynamicgroups/{id}/ruleset` and `/status`) has run **against the mock
+only**. Its normalizer is a port of ct-cli's `normalizeRuleset` and is checked byte for byte
+against goldens that ct-cli's own code produced: the 31 anonymized rulesets and 8 hand-made
+edge cases in `internal/ruleset/testdata` run in CI, and a local-only run over a full corpus of
+raw live GET bodies (`CT_RULESET_CORPUS=<dir> go test ./internal/ruleset`) matched every file
+when the resource was written. Not verified live: that a PUT of the normalized ruleset lands
+and reads back equal, the reply status and body of the two PUTs (the provider ignores both),
+and whether the GET bodies come wrapped in `data` (the client accepts both). The write path
+needs a run against a disposable group on dev before the first adoption.
 
 `group` (`/groups/{id}`) reads the group's ids from `information` and writes them flat
 (`name`, `groupTypeId`, `groupStatusId`, `campusId`). Verified read-only on eqrm-dev on

@@ -1,0 +1,1 @@
+[{"description":"x","query":{"method":"ChurchQuery","params":{"filter":{"and":[{"dterm":["Campus",{"==":[{"var":"ctgroup.campusId"},"1"]}]},{"dterm":[{"title":"group.x.title"},{"isnull":[{"var":"person.dateOfDeath"}]}]},{"dterm":[null,{"isnull":[{"var":"a"}]}]},{"dterm":["outer",{"dterm":["inner",{"oneof":[{"var":"b"},["3"]]}]}]}]}}},"process":{}}]

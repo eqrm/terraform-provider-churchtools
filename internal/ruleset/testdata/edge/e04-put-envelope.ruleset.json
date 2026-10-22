@@ -1,0 +1,1 @@
+{"dynamicGroupRuleSet":[{"description":"x","dynamicGroupUpdateStarted":"t","query":{"method":"ChurchQuery","params":{"filter":{"oneof":[{"var":"a"},["1","2"]]}}},"process":{"k":"9"}}]}
