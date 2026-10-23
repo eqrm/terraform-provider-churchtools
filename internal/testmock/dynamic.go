@@ -21,8 +21,9 @@ import (
 //   - GET/PUT status carry {"dynamicGroupStatus": "active"|"manual"|"none"}.
 //   - The endpoints take any existing group id, archived (status 3) included.
 //
-// Not verified live by this provider (no write ran): the reply status and body of
-// the two PUTs. The provider ignores both, and the mock answers 204 without a body.
+//   - Both PUTs answer 200 with the stored value echoed bare:
+//     {"dynamicGroupRuleSet":[RuleSet]} and {"dynamicGroupStatus": ...} (measured
+//     on eqrm-dev, 2026-10-23). The provider ignores the reply.
 // There is no /refresh route on purpose: the provider must never call it, and an
 // unknown route answers 404.
 
@@ -138,7 +139,7 @@ func (s *Server) handleDynamic(w http.ResponseWriter, r *http.Request) bool {
 		st.ruleset, st.lastPut = arr[0], body
 		st.putCount++
 		st.ops = append(st.ops, "ruleset")
-		w.WriteHeader(http.StatusNoContent)
+		writeBare(w, map[string]any{"dynamicGroupRuleSet": []any{st.ruleset}})
 	case parts[2] == "status" && r.Method == http.MethodGet:
 		status := st.status
 		if status == "" {
@@ -157,7 +158,7 @@ func (s *Server) handleDynamic(w http.ResponseWriter, r *http.Request) bool {
 		st.status = v
 		st.stCount++
 		st.ops = append(st.ops, "status")
-		w.WriteHeader(http.StatusNoContent)
+		writeBare(w, map[string]any{"dynamicGroupStatus": v})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		writeData(w, map[string]any{"message": "ChurchTools serves no " + r.Method + " on " + r.URL.Path})
