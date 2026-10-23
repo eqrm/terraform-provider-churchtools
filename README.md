@@ -145,8 +145,11 @@ when the resource was written. The write path ran on eqrm-dev on 2026-10-23 agai
 before and after); a changed `description` was PUT, read back with everything else equal and
 planned clean, then reverted; status went `active` → `manual` → `active`, each read back. A PUT
 re-serializes the rule with sorted keys, otherwise the content is unchanged. Both PUTs answer
-200 with the stored value echoed (the provider ignores the reply). Not run live: Create on a
-plain group (promotion). Writes are minimal by design: ruleset and status are only PUT when
+200 with the stored value echoed (the provider ignores the reply). The same day, Create
+promoted a throwaway plain group made in the same apply, with `refs` pointing at it (unknown at
+plan time): markers resolved to its id, status `manual` then `active` and back, clean plans.
+Create on 1740 with a different rule and no import failed without writing; importing a plain
+group (1755) was refused; destroy only un-managed (rules and status kept). Writes are minimal by design: ruleset and status are only PUT when
 they differ from live, Create refuses to overwrite a different live rule, and Import refuses a
 group without a rule.
 
