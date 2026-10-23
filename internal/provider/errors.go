@@ -45,3 +45,11 @@ func orphanOnDeleteDetail(kind string) string {
 		kind,
 	)
 }
+
+// dynamicGroupOnDeleteDetail explains what Delete of a churchtools_dynamic_group
+// did. Unlike the other resources the object here is a RULE that keeps acting:
+// ChurchTools re-evaluates it on its own schedule and adds and removes members.
+const dynamicGroupOnDeleteDetail = "Die dynamische Regel der Gruppe wurde nicht entfernt und nicht abgeschaltet. " +
+	"Sie läuft in ChurchTools weiter und hält die Mitglieder der Gruppe automatisch aktuell; " +
+	"nur der Terraform-State wurde bereinigt. Soll die Regel enden, stelle die Gruppe in " +
+	"ChurchTools auf „manuell“ oder entferne das Regelwerk dort von Hand."

@@ -53,6 +53,8 @@ type Server struct {
 	members         map[string][]int
 	lastTypePost    map[string]map[string]any
 	membersStatuses map[string][]string
+	// dyn backs the dynamic group routes (dynamic.go).
+	dyn map[string]*dynState
 
 	// Login accounting. Live ChurchTools logs "Erfolgreich angemeldet ...
 	// mittels logintoken" for every request that presents the token, whether
@@ -481,6 +483,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	if s.handleGroupType(w, r) {
 		return
 	}
+	if s.handleDynamic(w, r) {
+		return
+	}
 
 	collection, id := splitPath(r.URL.Path)
 
@@ -776,6 +781,12 @@ func pageParams(r *http.Request) (page, limit int) {
 func writeDataMeta(w http.ResponseWriter, v any, meta map[string]any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"data": v, "meta": meta})
+}
+
+// writeBare answers without the `data` envelope, as the dynamic-group endpoints do.
+func writeBare(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
 }
 
 func writeData(w http.ResponseWriter, v any) {
