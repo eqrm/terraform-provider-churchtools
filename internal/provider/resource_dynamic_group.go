@@ -161,6 +161,14 @@ func (r *dynamicGroupResource) ValidateConfig(ctx context.Context, req resource.
 			}
 		}
 	}
+	if vals, _ := refsValues(cfg.Refs); len(vals) > 0 {
+		for _, k := range refsKeys(cfg.Refs) {
+			if v, ok := vals[k]; ok && !ruleset.ValidID(v) {
+				resp.Diagnostics.AddAttributeError(path.Root("refs"), "Ungültige id in refs",
+					fmt.Sprintf("refs[%q] = %q ist keine numerische ChurchTools-id (nur Ziffern, ohne führende Nullen).", k, v))
+			}
+		}
+	}
 	if cfg.Ruleset.IsNull() || cfg.Ruleset.IsUnknown() {
 		return
 	}
@@ -282,7 +290,32 @@ func (r *dynamicGroupResource) liveRuleset(ctx context.Context, id string) (map[
 	return ruleset.Normalize(raw)
 }
 
-func (r *dynamicGroupResource) apply(ctx context.Context, plan dynamicGroupModel) error {
+// liveStatus reads the group's status; "" when it cannot be told (404).
+func (r *dynamicGroupResource) liveStatus(ctx context.Context, id string) (string, error) {
+	st, err := r.client.GetJSON(ctx, statusPath(id))
+	if isStatus(err, 404) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if m, ok := st.(map[string]any); ok {
+		if s, ok := m["dynamicGroupStatus"].(string); ok {
+			return s, nil
+		}
+	}
+	return "", nil
+}
+
+// apply writes only what differs from ChurchTools: the ruleset when the normalized
+// trees differ, the status when it differs. A refs-only change therefore writes
+// nothing. With create set, an existing different ruleset is an error (the group
+// has to be imported first), an equal one is adopted without a write.
+//
+// Order: for `manual` the status goes first, so a rule that changes in the same
+// apply is never evaluated live on its way to being switched off; for `active` the
+// ruleset goes first, so the rule is complete before it starts running.
+func (r *dynamicGroupResource) apply(ctx context.Context, plan dynamicGroupModel, create bool) error {
 	id := plan.GroupID.ValueString()
 	desired, err := resolveRuleset(plan.Ruleset, plan.Refs)
 	if err != nil {
@@ -292,13 +325,41 @@ func (r *dynamicGroupResource) apply(ctx context.Context, plan dynamicGroupModel
 	if err != nil {
 		return fmt.Errorf("Regelwerk von Gruppe %s konnte nicht gelesen werden: %w", id, err)
 	}
-	if live == nil || !ruleset.Equal(desired, live) {
+	if create && live != nil && !ruleset.Equal(desired, live) {
+		return fmt.Errorf("Gruppe %s hat bereits eine Regel, die vom Regelwerk in der Konfiguration abweicht. "+
+			"Importiere sie zuerst (`tofu import churchtools_dynamic_group.<name> %s`), damit der Plan den Unterschied "+
+			"zeigt, statt sie zu überschreiben.", id, id)
+	}
+	liveStatus, err := r.liveStatus(ctx, id)
+	if err != nil {
+		return fmt.Errorf("Status von Gruppe %s konnte nicht gelesen werden: %w", id, err)
+	}
+	putRuleset := func() error {
+		if live != nil && ruleset.Equal(desired, live) {
+			return nil
+		}
 		if err := r.client.Put(ctx, rulesetPath(id), ruleset.PutBody(desired)); err != nil {
 			return fmt.Errorf("Regelwerk von Gruppe %s konnte nicht gespeichert werden: %w", id, err)
 		}
+		return nil
 	}
-	if err := r.client.Put(ctx, statusPath(id), map[string]any{"dynamicGroupStatus": plan.Status.ValueString()}); err != nil {
-		return fmt.Errorf("Status von Gruppe %s konnte nicht gespeichert werden: %w", id, err)
+	putStatus := func() error {
+		if liveStatus == plan.Status.ValueString() {
+			return nil
+		}
+		if err := r.client.Put(ctx, statusPath(id), map[string]any{"dynamicGroupStatus": plan.Status.ValueString()}); err != nil {
+			return fmt.Errorf("Status von Gruppe %s konnte nicht gespeichert werden: %w", id, err)
+		}
+		return nil
+	}
+	steps := []func() error{putRuleset, putStatus}
+	if plan.Status.ValueString() == "manual" {
+		steps = []func() error{putStatus, putRuleset}
+	}
+	for _, step := range steps {
+		if err := step(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -312,7 +373,7 @@ func (r *dynamicGroupResource) Create(ctx context.Context, req resource.CreateRe
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if err := r.apply(ctx, plan); err != nil {
+	if err := r.apply(ctx, plan, true); err != nil {
 		resp.Diagnostics.AddError("Dynamische Gruppe konnte nicht angelegt werden", err.Error())
 		return
 	}
@@ -329,7 +390,7 @@ func (r *dynamicGroupResource) Update(ctx context.Context, req resource.UpdateRe
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if err := r.apply(ctx, plan); err != nil {
+	if err := r.apply(ctx, plan, false); err != nil {
 		resp.Diagnostics.AddError("Dynamische Gruppe konnte nicht aktualisiert werden", err.Error())
 		return
 	}
@@ -423,6 +484,22 @@ func (r *dynamicGroupResource) ImportState(ctx context.Context, req resource.Imp
 		resp.Diagnostics.AddError("Ungültige Gruppen-id",
 			fmt.Sprintf("%q ist keine numerische Gruppen-id. Nutze `tofu import churchtools_dynamic_group.<name> <id>` "+
 				"mit der Gruppen-id aus der ChurchTools-URL (/groups/<id>).", req.ID))
+		return
+	}
+	if notConfigured(r.client, &resp.Diagnostics) {
+		return
+	}
+	// Import adopts an existing rule. A group without one (or an id that does not
+	// exist) is refused, so a wrong id in a host map cannot promote a plain group.
+	// Promoting is still possible by creating the resource without an import.
+	if _, err := r.client.GetJSON(ctx, rulesetPath(req.ID)); isStatus(err, 404) {
+		resp.Diagnostics.AddError("Gruppe hat keine dynamische Regel",
+			fmt.Sprintf("Gruppe %s hat in ChurchTools kein Regelwerk (oder es gibt die Gruppe nicht). Import übernimmt nur "+
+				"bestehende Regeln. Prüfe die Gruppen-id; soll die Gruppe erst dynamisch werden, lege die Ressource "+
+				"ohne import-Block an.", req.ID))
+		return
+	} else if err != nil {
+		resp.Diagnostics.AddError("Regelwerk konnte nicht gelesen werden", err.Error())
 		return
 	}
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)

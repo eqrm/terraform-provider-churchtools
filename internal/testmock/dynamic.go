@@ -30,6 +30,7 @@ type dynState struct {
 	putCount int // PUT /ruleset calls
 	stCount  int // PUT /status calls
 	lastPut  map[string]any
+	ops      []string // "ruleset" / "status", in PUT order
 }
 
 // SeedDynamic gives a group a ruleset exactly as live GET would return it: raw is a
@@ -132,6 +133,7 @@ func (s *Server) handleDynamic(w http.ResponseWriter, r *http.Request) bool {
 		}
 		st.ruleset, st.lastPut = arr[0], body
 		st.putCount++
+		st.ops = append(st.ops, "ruleset")
 		w.WriteHeader(http.StatusNoContent)
 	case parts[2] == "status" && r.Method == http.MethodGet:
 		if st.ruleset == nil {
@@ -150,10 +152,18 @@ func (s *Server) handleDynamic(w http.ResponseWriter, r *http.Request) bool {
 		}
 		st.status = v
 		st.stCount++
+		st.ops = append(st.ops, "status")
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		writeData(w, map[string]any{"message": "ChurchTools serves no " + r.Method + " on " + r.URL.Path})
 	}
 	return true
+}
+
+// DynamicOps returns the order of the PUTs a group received ("ruleset", "status").
+func (s *Server) DynamicOps(groupID int) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.dynFor(strconv.Itoa(groupID)).ops...)
 }

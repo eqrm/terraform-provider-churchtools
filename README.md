@@ -137,7 +137,9 @@ edge cases in `internal/ruleset/testdata` run in CI, and a local-only run over a
 raw live GET bodies (`CT_RULESET_CORPUS=<dir> go test ./internal/ruleset`) matched every file
 when the resource was written. Not verified live: that a PUT of the normalized ruleset lands
 and reads back equal, the reply status and body of the two PUTs (the provider ignores both),
-and whether the GET bodies come wrapped in `data` (the client accepts both). The write path
+and whether the GET bodies come wrapped in `data` (the client accepts both). Writes are minimal by design: ruleset and status are only PUT when they differ from live,
+Create refuses to overwrite a different live rule, and Import refuses a group without a rule.
+The write path
 needs a run against a disposable group on dev before the first adoption.
 
 `group` (`/groups/{id}`) reads the group's ids from `information` and writes them flat

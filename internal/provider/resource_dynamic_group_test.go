@@ -3,6 +3,7 @@ package provider_test
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"testing"
 
@@ -62,6 +63,9 @@ func TestAccDynamicGroup_Lifecycle(t *testing.T) {
 					resource.TestCheckResourceAttr(dgAddr, "status", "active"),
 					puts(1, 1),
 					func(*terraform.State) error {
+						if ops := mock.DynamicOps(500); !reflect.DeepEqual(ops, []string{"ruleset", "status"}) {
+							t.Errorf("active: PUT order = %v, want ruleset first", ops)
+						}
 						body := mock.LastRulesetPut(500)
 						arr, ok := body["dynamicGroupRuleSet"].([]any)
 						if !ok || len(arr) != 1 || len(body) != 1 {
@@ -89,13 +93,13 @@ func TestAccDynamicGroup_Lifecycle(t *testing.T) {
 			},
 			{
 				Config: dgConfig(mock.URL, "500", "active", jsonLit(`{"description":"d2","query":{},"process":{}}`), ""),
-				Check:  resource.ComposeTestCheckFunc(puts(2, 2)),
+				Check:  resource.ComposeTestCheckFunc(puts(2, 1)),
 			},
 			{
 				Config: dgConfig(mock.URL, "500", "manual", jsonLit(`{"description":"d2","query":{},"process":{}}`), ""),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(dgAddr, "status", "manual"),
-					puts(2, 3), // status only: the ruleset is not rewritten
+					puts(2, 2), // status only: the ruleset is not rewritten
 					func(*terraform.State) error {
 						if _, st := mock.Dynamic(500); st != "manual" {
 							t.Errorf("status = %q", st)
@@ -215,6 +219,7 @@ func TestAccDynamicGroup_ValidationErrors(t *testing.T) {
 			Steps: []resource.TestStep{{
 				Config:      dgConfig(mock.URL, "502", "active", jsonLit(marker), `    "group:k" = "abc"`),
 				ExpectError: regexp.MustCompile("keine numerische ChurchTools-id"),
+				PlanOnly:    true, // caught at validate time, not at apply
 			}},
 		})
 	})
@@ -290,7 +295,7 @@ func TestAccDynamicGroup_ImportErrors(t *testing.T) {
 				ResourceName:  dgAddr,
 				ImportState:   true,
 				ImportStateId: "9",
-				ExpectError:   regexp.MustCompile("(?i)cannot import non-existent remote object"),
+				ExpectError:   regexp.MustCompile("hat keine dynamische Regel"),
 			},
 		},
 	})
@@ -311,6 +316,98 @@ func TestAccDynamicGroup_PromotePlainGroup(t *testing.T) {
 				}
 				return nil
 			},
+		}},
+	})
+}
+
+// Import of a group whose live rule matches the markers + refs in the config: the plan
+// shows a refs-only update (OpenTofu rejects a plan that drops a configured value for
+// a null prior), but applying it writes nothing (no status PUT, no ruleset PUT).
+func TestAccDynamicGroup_ImportWithRefsIsNoop(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedGroup(mock, 505, 1)
+	mock.SeedDynamic(505, "active", `[{"description":"d","dynamicGroupUpdateStarted":"t",
+	  "query":{"method":"ChurchQuery","params":{"filter":{"and":[
+	    {"dterm":["lbl",{"==":[{"var":"ctgroup.groupTypeId"},"11"]}]},
+	    {"oneof":[{"var":"ctgroup.id"},[42]]}]}}},"process":{}}]`)
+	rs := `{"description":"d","query":{"method":"ChurchQuery","params":{"filter":{"and":[
+	  {"==":[{"var":"ctgroup.groupTypeId"},{"__ctRef":true,"kind":"group-type","key":"group"}]},
+	  {"oneof":[{"var":"ctgroup.id"},[{"__ctRef":true,"kind":"group","key":"other"}]]}]}}},"process":{}}`
+	cfg := dgConfig(mock.URL, "505", "active", jsonLit(rs), `    "group-type:group" = "11"
+    "group:other" = "42"`)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: cfg, ResourceName: dgAddr, ImportState: true, ImportStateId: "505", ImportStatePersist: true},
+			{
+				Config: cfg,
+				Check: func(*terraform.State) error {
+					if rs, st := mock.DynamicPuts(505); rs != 0 || st != 0 {
+						t.Errorf("import + refs wrote: ruleset %d, status %d", rs, st)
+					}
+					return nil
+				},
+			},
+		},
+	})
+}
+
+// Create must not overwrite a different live rule; an equal one is adopted without a write.
+func TestAccDynamicGroup_CreateGuardsExistingRule(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedGroup(mock, 506, 1)
+	mock.SeedDynamic(506, "active", `[{"description":"other rule","query":{},"process":{}}]`)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{
+				Config:      dgConfig(mock.URL, "506", "active", jsonLit(baseRuleset), ""),
+				ExpectError: regexp.MustCompile("hat bereits eine Regel"),
+			},
+			{
+				Config: dgConfig(mock.URL, "506", "active", jsonLit(`{"description":"other rule","query":{},"process":{}}`), ""),
+				Check: func(*terraform.State) error {
+					if rs, st := mock.DynamicPuts(506); rs != 0 || st != 0 {
+						t.Errorf("adopting an equal rule wrote: %d/%d", rs, st)
+					}
+					return nil
+				},
+			},
+		},
+	})
+}
+
+// `manual`: status first, then the ruleset.
+func TestAccDynamicGroup_ManualWritesStatusFirst(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedGroup(mock, 507, 1)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{{
+			Config: dgConfig(mock.URL, "507", "manual", jsonLit(baseRuleset), ""),
+			Check: func(*terraform.State) error {
+				if ops := mock.DynamicOps(507); !reflect.DeepEqual(ops, []string{"status", "ruleset"}) {
+					t.Errorf("manual: PUT order = %v", ops)
+				}
+				return nil
+			},
+		}},
+	})
+}
+
+// A group without a rule is not imported (a wrong id must not promote a plain group).
+func TestAccDynamicGroup_ImportRefusesPlainGroup(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedGroup(mock, 508, 1)
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{{
+			Config: dgConfig(mock.URL, "508", "active", jsonLit(baseRuleset), ""), ResourceName: dgAddr,
+			ImportState: true, ImportStateId: "508", ExpectError: regexp.MustCompile("hat keine dynamische Regel"),
 		}},
 	})
 }

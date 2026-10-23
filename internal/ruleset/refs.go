@@ -172,3 +172,6 @@ func Resolve(v any, refs map[string]string) (any, error) {
 	}
 	return walk(v)
 }
+
+// ValidID reports whether s is a usable ChurchTools id: digits, no leading zeros.
+func ValidID(s string) bool { return canonicalID.MatchString(s) }
