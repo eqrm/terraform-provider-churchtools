@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -99,7 +100,7 @@ func (r *dynamicGroupResource) Configure(_ context.Context, req resource.Configu
 	r.client = configureClient(req, resp, r.client)
 }
 
-// refsKey is "<kind>:<non-empty>" with a supported kind.
+// refsKeyKind matches "<kind>:<non-empty>"; the kind is checked separately.
 var refsKeyKind = regexp.MustCompile(`^([a-z-]+):(.+)$`)
 
 // refsValues returns the refs as a plain map. known is false while the map or
@@ -153,7 +154,7 @@ func (r *dynamicGroupResource) ValidateConfig(ctx context.Context, req resource.
 	if !cfg.Refs.IsNull() && !cfg.Refs.IsUnknown() {
 		for _, k := range refsKeys(cfg.Refs) {
 			m := refsKeyKind.FindStringSubmatch(k)
-			if m == nil || !contains(ruleset.RefKeyKinds(), m[1]) {
+			if m == nil || !slices.Contains(ruleset.RefKeyKinds(), m[1]) {
 				resp.Diagnostics.AddAttributeError(path.Root("refs"), "Ungültiger refs-Schlüssel",
 					fmt.Sprintf("%q ist kein gültiger Schlüssel. Erwartet wird \"<kind>:<key>\" mit kind aus %s "+
 						"(bei group-type-role: \"group-type-role:<Gruppentyp>/<Rolle>\").",
@@ -209,15 +210,6 @@ func (r *dynamicGroupResource) ValidateConfig(ctx context.Context, req resource.
 					"oder den Schlüssel prüfen (ein veralteter Eintrag würde sonst unbemerkt bleiben).", k))
 		}
 	}
-}
-
-func contains(s []string, v string) bool {
-	for _, x := range s {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }
 
 // resolve turns the authored ruleset into the normalized tree ChurchTools should

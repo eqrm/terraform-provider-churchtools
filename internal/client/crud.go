@@ -104,9 +104,9 @@ func (c *Client) Post(ctx context.Context, path string, body any) error {
 
 // GetJSON reads an endpoint whose body is not a row: the dynamic-group ruleset
 // (a single-element array) and status. Numbers stay json.Number, so ids above
-// 2^53 and the int/float spelling survive. ct-cli unwraps `.data ?? body`; so
-// does this, because the live envelope for these two endpoints is unmeasured by
-// the provider. A 404 is returned as a *StatusError (the path names the group, so
+// 2^53 and the int/float spelling survive. Live CT answers both bare, without a
+// `data` envelope (eqrm-dev, 2026-10-23); a `data` key is still unwrapped, as
+// ct-cli's `.data ?? body` does. A 404 is returned as a *StatusError (the path names the group, so
 // the caller decides whether that means "no ruleset").
 func (c *Client) GetJSON(ctx context.Context, path string) (any, error) {
 	raw, err := c.do(ctx, http.MethodGet, path, nil)

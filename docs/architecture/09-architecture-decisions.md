@@ -31,7 +31,7 @@
 
 ## ADR-6: Separate resources for hierarchy and rulesets
 
-- **Status:** Accepted; `churchtools_dynamic_group` is built (v0.10.0). The hierarchy resource (`churchtools_group_parent`) is still to do.
+- **Status:** Accepted; `churchtools_dynamic_group` is built. The hierarchy resource (`churchtools_group_parent`) is still to do.
 - **Decision:** `churchtools_group` carries only name, type, status and campus. The dynamic rule of a group is its own resource, `churchtools_dynamic_group`, so a ruleset error cannot take the group (and its type migration) with it.
   - **Attributes:** `group_id` (RequiresReplace, import id), `status` (`active` | `manual`, no `none`), `ruleset` (JSON string), `refs` (map of strings).
   - **Ruleset stays a JSON file.** Host-specific ids are `{"__ctRef":true,"kind":...}` markers (`group`, `campus`, `group-type`, `group-type-role`, `person`). The provider replaces each with the integer id from `refs` (`<kind>:<key>`, `group-type-role:<type>/<role>`), in `query` and in `process.*.handleMembership.groupTypeRoleId`. A marker without an entry, or an entry without a marker, fails at validate time. Unknown ref values (a group created in the same run) defer. The refs values are real references, so they are graph edges. The same file also works with ct-cli, which keeps the way back open.

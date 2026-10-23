@@ -11,8 +11,10 @@ import (
 //
 // What is modelled, from ct-cli (src/engine/synthetic.ts, dynamic.ts) and its
 // live measurements on CT 3.134-3.137:
-//   - GET ruleset answers a single-element array [RuleSet]; a group without a
-//     ruleset answers 404.
+//   - GET ruleset answers a bare single-element array [RuleSet] and GET status a
+//     bare {"dynamicGroupStatus": ...}, with no `data` envelope; a group without a
+//     ruleset answers 404 on ruleset and 200 "none" on status; an unknown group
+//     answers 404 on both (measured on eqrm-dev, CT 3.137, 2026-10-23).
 //   - PUT ruleset wants {"dynamicGroupRuleSet":[RuleSet]}. A bare object or a bare
 //     array is refused, as live CT does (ct-cli #77: "Array expected" / "Object
 //     expected").
@@ -109,13 +111,15 @@ func (s *Server) handleDynamic(w http.ResponseWriter, r *http.Request) bool {
 			return true
 		}
 		if _, isArr := st.ruleset.([]any); isArr {
-			writeData(w, st.ruleset)
+			writeBare(w, st.ruleset)
 		} else {
-			writeData(w, []any{st.ruleset})
+			writeBare(w, []any{st.ruleset})
 		}
 	case parts[2] == "ruleset" && r.Method == http.MethodPut:
 		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		dec := json.NewDecoder(r.Body)
+		dec.UseNumber()
+		if err := dec.Decode(&body); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			writeData(w, map[string]any{"message": "Object expected"})
 			return true
@@ -136,11 +140,11 @@ func (s *Server) handleDynamic(w http.ResponseWriter, r *http.Request) bool {
 		st.ops = append(st.ops, "ruleset")
 		w.WriteHeader(http.StatusNoContent)
 	case parts[2] == "status" && r.Method == http.MethodGet:
-		if st.ruleset == nil {
-			w.WriteHeader(http.StatusNotFound)
-			return true
+		status := st.status
+		if status == "" {
+			status = "none"
 		}
-		writeData(w, map[string]any{"dynamicGroupStatus": st.status})
+		writeBare(w, map[string]any{"dynamicGroupStatus": status})
 	case parts[2] == "status" && r.Method == http.MethodPut:
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)

@@ -783,6 +783,12 @@ func writeDataMeta(w http.ResponseWriter, v any, meta map[string]any) {
 	json.NewEncoder(w).Encode(map[string]any{"data": v, "meta": meta})
 }
 
+// writeBare answers without the `data` envelope, as the dynamic-group endpoints do.
+func writeBare(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
+}
+
 func writeData(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"data": v})

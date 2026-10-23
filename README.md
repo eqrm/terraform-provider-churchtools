@@ -130,14 +130,18 @@ on job (19) failed with that error and left field and state at `true`, and an
 `is_new_person_field` toggle of field 32 passed it both ways and was restored. A
 successful `is_active` toggle has not run live yet.
 
-`dynamic_group` (`/dynamicgroups/{id}/ruleset` and `/status`) has run **against the mock
-only**. Its normalizer is a port of ct-cli's `normalizeRuleset` and is checked byte for byte
+`dynamic_group` (`/dynamicgroups/{id}/ruleset` and `/status`) has **read** live, writes
+against the mock only. On eqrm-dev on 2026-10-23 an import and plan of two existing rules,
+one verbatim and one with five ids swapped for `__ctRef` markers plus `refs`, planned no
+ruleset or status change (the marker one adds `refs`, which import cannot know). The same
+probe measured the bodies the mock now copies: both GETs answer bare JSON without a `data`
+envelope; a group without a rule answers 404 on ruleset and `{"dynamicGroupStatus":"none"}`
+on status; an unknown group answers 404 on both. Its normalizer is a port of ct-cli's `normalizeRuleset` and is checked byte for byte
 against goldens that ct-cli's own code produced: the 31 anonymized rulesets and 8 hand-made
 edge cases in `internal/ruleset/testdata` run in CI, and a local-only run over a full corpus of
 raw live GET bodies (`CT_RULESET_CORPUS=<dir> go test ./internal/ruleset`) matched every file
 when the resource was written. Not verified live: that a PUT of the normalized ruleset lands
-and reads back equal, the reply status and body of the two PUTs (the provider ignores both),
-and whether the GET bodies come wrapped in `data` (the client accepts both). Writes are minimal by design: ruleset and status are only PUT when they differ from live,
+and reads back equal, the reply status and body of the two PUTs (the provider ignores both). Writes are minimal by design: ruleset and status are only PUT when they differ from live,
 Create refuses to overwrite a different live rule, and Import refuses a group without a rule.
 The write path
 needs a run against a disposable group on dev before the first adoption.
