@@ -399,3 +399,203 @@ func TestAccGroup_TypeMigrationKeepsNewTypeWhenVerifyFails(t *testing.T) {
 		},
 	})
 }
+
+// inform_leader is Optional + Computed. Unset: never sent (create or update), no
+// diff, the value CT holds is read into state. Set: sent, read back, enforced.
+// The mock's default for a new group is set to true here, so "unset" reads back
+// true only if the provider sent nothing.
+func TestAccGroup_InformLeader(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	mock.GroupInformLeaderDefault(true)
+	const addr = "churchtools_group.g"
+
+	sent := func(want map[string]any) resource.TestCheckFunc {
+		return func(*terraform.State) error {
+			if got := mock.LastPatch("/groups"); !reflect.DeepEqual(got, want) {
+				t.Errorf("PATCH body = %v, want %v", got, want)
+			}
+			return nil
+		}
+	}
+	held := func(want bool) resource.TestCheckFunc {
+		return func(*terraform.State) error {
+			row := mock.Find("/groups", "name", "Gruppe IL")
+			if row == nil {
+				t.Fatal("group not in mock")
+			}
+			if got := row["settings"].(map[string]any)["informLeader"]; got != want {
+				t.Errorf("CT holds informLeader = %v, want %v", got, want)
+			}
+			return nil
+		}
+	}
+	cfg := func(line string) string { return groupConfig(mock.URL, "Gruppe IL", line) }
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{
+				// Unset on create: not in the POST body, state takes CT's value.
+				Config: cfg(``),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "inform_leader", "true"),
+					func(*terraform.State) error {
+						if _, has := mock.LastPost("/groups")["informLeader"]; has {
+							t.Error("unset inform_leader was sent on create")
+						}
+						return nil
+					},
+				),
+			},
+			{Config: cfg(``), PlanOnly: true}, // no diff, no "(known after apply)"
+			{
+				// Set to false: PATCH carries only it, CT holds it, state reads it back.
+				Config: cfg(`  inform_leader = false`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "inform_leader", "false"),
+					sent(map[string]any{"informLeader": false}), held(false),
+				),
+			},
+			{Config: cfg(`  inform_leader = false`), PlanOnly: true},
+			{
+				// Back to unset: the provider lets go, the value stays and nothing is sent.
+				PreConfig: func() { mock.ClearLastPatch("/groups") },
+				Config:    cfg(``),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "inform_leader", "false"),
+					sent(nil), held(false),
+				),
+			},
+			{Config: cfg(``), PlanOnly: true},
+			{
+				Config: cfg(`  inform_leader = true`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "inform_leader", "true"),
+					sent(map[string]any{"informLeader": true}), held(true),
+				),
+			},
+			{
+				// Drift: someone flips it in the UI. Set in config, so it is detected and put back.
+				PreConfig: func() {
+					row := mock.Find("/groups", "name", "Gruppe IL")
+					row["settings"].(map[string]any)["informLeader"] = false
+				},
+				Config:             cfg(`  inform_leader = true`),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+			{
+				Config: cfg(`  inform_leader = true`),
+				Check:  resource.ComposeTestCheckFunc(held(true), sent(map[string]any{"informLeader": true})),
+			},
+			{
+				// Unset: drift is read into state but is no diff.
+				PreConfig: func() {
+					row := mock.Find("/groups", "name", "Gruppe IL")
+					row["settings"].(map[string]any)["informLeader"] = false
+				},
+				Config:   cfg(``),
+				PlanOnly: true,
+			},
+		},
+	})
+}
+
+// Set on create: live CT ignores informLeader on POST, so it is not sent there
+// but PATCHed right after, and read back. A value CT already holds is not PATCHed.
+func TestAccGroup_InformLeaderOnCreate(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	notInPost := func(*terraform.State) error {
+		if _, has := mock.LastPost("/groups")["informLeader"]; has {
+			t.Error("informLeader was sent on POST, which live CT ignores")
+		}
+		return nil
+	}
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{
+				Config: groupConfig(mock.URL, "Gruppe IL2", `  inform_leader = true`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("churchtools_group.g", "inform_leader", "true"),
+					notInPost,
+					func(*terraform.State) error {
+						if got := mock.LastPatch("/groups"); !reflect.DeepEqual(got, map[string]any{"informLeader": true}) {
+							t.Errorf("PATCH body = %v, want only informLeader: true", got)
+						}
+						row := mock.Find("/groups", "name", "Gruppe IL2")
+						if got := row["settings"].(map[string]any)["informLeader"]; got != true {
+							t.Errorf("CT holds informLeader = %v, want true", got)
+						}
+						return nil
+					},
+				),
+			},
+			{Config: groupConfig(mock.URL, "Gruppe IL2", `  inform_leader = true`), PlanOnly: true},
+		},
+	})
+
+	mock2 := testmock.New()
+	defer mock2.Close()
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{{
+			Config: groupConfig(mock2.URL, "Gruppe IL2b", `  inform_leader = false`),
+			Check: resource.ComposeTestCheckFunc(
+				resource.TestCheckResourceAttr("churchtools_group.g", "inform_leader", "false"),
+				func(*terraform.State) error {
+					if got := mock2.LastPatch("/groups"); got != nil {
+						t.Errorf("PATCH %v sent although CT already holds false", got)
+					}
+					return nil
+				},
+			),
+		}},
+	})
+}
+
+// CT ignoring the PATCH that sets inform_leader on create fails the apply and
+// keeps the group in state on what CT holds.
+func TestAccGroup_InformLeaderOnCreateIgnoredFails(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	mock.IgnoreOnPatch("/groups", 1001, "informLeader") // the mock's first create id
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{{
+			Config:      groupConfig(mock.URL, "Gruppe IL4", `  inform_leader = true`),
+			ExpectError: regexp.MustCompile(`(?s)ChurchTools hat die.*ignoriert`),
+		}},
+	})
+}
+
+// CT accepting inform_leader and keeping the old value fails the apply.
+func TestAccGroup_InformLeaderIgnoredFails(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	mock.Seed("/groups", 5002, map[string]any{
+		"name":        "Gruppe IL3",
+		"information": map[string]any{"groupTypeId": float64(11), "groupStatusId": float64(2), "campusId": nil},
+		"settings":    map[string]any{"informLeader": true},
+	})
+	mock.IgnoreOnPatch("/groups", 5002, "informLeader")
+	imp := providerBlock(mock.URL) + `
+import {
+  to = churchtools_group.g
+  id = "5002"
+}
+resource "churchtools_group" "g" {
+  name            = "Gruppe IL3"
+  group_type_id   = "11"
+  group_status_id = "2"
+`
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: imp + "}"},
+			{Config: imp + "  inform_leader = false\n}", ExpectError: regexp.MustCompile(`(?s)ChurchTools hat die.*ignoriert`)},
+		},
+	})
+}

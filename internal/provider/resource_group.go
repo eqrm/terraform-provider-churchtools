@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -22,7 +23,7 @@ const groupCollection = "/groups"
 
 // A ChurchTools group (Gruppe, /groups) — the group itself, nothing around it.
 //
-// Four settings: name, group type, group status and campus. Hierarchy, dynamic
+// Five settings: name, group type, group status, campus and inform_leader. Hierarchy, dynamic
 // rulesets, member fields and grants are deliberately NOT here; they will be
 // separate resources that point at this one (`churchtools_group_parent`,
 // `churchtools_dynamic_group`, and
@@ -35,6 +36,15 @@ const groupCollection = "/groups"
 // campus_id is Optional and NOT Computed: null means "no campus" and is enforced
 // (ct-cli sends `campusId ?? null`, and `ct export tf` omits null fields). "0" is
 // a real campus and must survive as "0".
+//
+// inform_leader ("Leiter bei Änderungen informieren") is Optional + Computed: left
+// out of config the provider does not manage it (no diff, never sent, the value
+// CT holds is read into state). Set, it is enforced and drift-detected. CT mails
+// the leaders of the group AND of its parent groups on every membership change
+// while it is on. Read: `settings.informLeader` (bool). Write: a flat top-level
+// `informLeader`, which PATCH takes and POST ignores (measured on eqrm-dev,
+// 2026-10-26), so Create sets it with a PATCH after the POST. Every write is read
+// back, so a key CT ignores is a loud error, not silent drift.
 //
 // Read shape, probed read-only on eqrm-dev on 2026-10-16: the row nests the three
 // ids under `information`, and campusId is always there, JSON null or an int.
@@ -51,6 +61,7 @@ type groupModel struct {
 	GroupTypeID   types.String `tfsdk:"group_type_id"`
 	GroupStatusID types.String `tfsdk:"group_status_id"`
 	CampusID      types.String `tfsdk:"campus_id"`
+	InformLeader  types.Bool   `tfsdk:"inform_leader"`
 }
 
 func NewGroupResource() resource.Resource { return &groupResource{} }
@@ -90,6 +101,15 @@ func (r *groupResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Description: "Id of the campus, e.g. churchtools_campus.x.id. \"0\" is a valid campus. " +
 					"Left out, the group has no campus — and a campus set in ChurchTools is removed.",
 			},
+			"inform_leader": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Description: "\"Leiter bei Änderungen informieren\": when true, ChurchTools emails the leaders of " +
+					"the group and of its parent groups on every membership change. Left out, the provider does " +
+					"not manage it: no diff, nothing sent, the value ChurchTools holds is read into state. " +
+					"Set, it is enforced and drift is reported.",
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+			},
 		},
 	}
 }
@@ -122,6 +142,15 @@ var groupFields = []struct {
 	{"groupStatusId", "group_status_id", func(m groupModel) types.String { return m.GroupStatusID }},
 	{"campusId", "campus_id", func(m groupModel) types.String { return m.CampusID }},
 }
+
+// groupInformLeaderKey is the request key of inform_leader; the row serves it as
+// `settings.informLeader`.
+const groupInformLeaderKey = "informLeader"
+
+// informLeaderManaged reports whether a value of inform_leader is set. Pass the
+// config value: with UseStateForUnknown an unset attribute plans as unknown on
+// create but as the state value on update, so the plan can't tell in Update.
+func informLeaderManaged(v types.Bool) bool { return !v.IsNull() && !v.IsUnknown() }
 
 // groupValue turns one managed setting into its request value.
 func groupValue(key, attr string, v types.String) (any, error) {
@@ -168,6 +197,53 @@ func (r *groupResource) Create(ctx context.Context, req resource.CreateRequest, 
 		return
 	}
 	plan.ID = types.StringValue(id)
+	// POST ignores informLeader (live on eqrm-dev, 2026-10-26: a create with
+	// `informLeader: true` answered 200 and the group stood on false), while PATCH
+	// takes it. So the setting is never sent on create: read what CT gave the new
+	// group, then PATCH it if config wants something else.
+	got, gerr := r.client.Get(ctx, groupCollection, id)
+	if gerr != nil {
+		want := plan.InformLeader
+		plan.InformLeader = types.BoolNull()
+		resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+		if want.IsUnknown() {
+			// Only the computed value is missing; the next refresh fills it. An error
+			// here would taint a group that was created correctly.
+			resp.Diagnostics.AddWarning("inform_leader der neuen Gruppe konnte nicht gelesen werden", gerr.Error())
+		} else {
+			resp.Diagnostics.AddError("Gruppe wurde angelegt, aber nicht zurückgelesen", gerr.Error())
+		}
+		return
+	}
+	have := groupFromRow(id, got).InformLeader
+	if informLeaderManaged(plan.InformLeader) && !plan.InformLeader.Equal(have) {
+		if _, err := r.client.Update(ctx, groupCollection, id, "PATCH",
+			client.Row{groupInformLeaderKey: plan.InformLeader.ValueBool()}); err != nil {
+			want := plan.InformLeader
+			plan.InformLeader = have
+			resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+			resp.Diagnostics.AddError("Gruppe wurde angelegt, inform_leader aber nicht gesetzt",
+				fmt.Sprintf("inform_leader = %t: %s", want.ValueBool(), err.Error()))
+			return
+		}
+		after, err := r.client.Get(ctx, groupCollection, id)
+		if err != nil {
+			resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+			resp.Diagnostics.AddError("Gruppe konnte nach dem Speichern nicht gelesen werden", err.Error())
+			return
+		}
+		have = groupFromRow(id, after).InformLeader
+		if !plan.InformLeader.Equal(have) {
+			want := plan.InformLeader
+			plan.InformLeader = have
+			resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+			resp.Diagnostics.AddError("ChurchTools hat die Änderung ignoriert",
+				fmt.Sprintf("Die Änderung an %s/%s mit inform_leader = %t wurde angenommen, die Gruppe steht "+
+					"danach aber auf %s.", groupCollection, id, want.ValueBool(), have))
+			return
+		}
+	}
+	plan.InformLeader = have
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
@@ -179,6 +255,7 @@ func groupFromRow(id string, row client.Row) groupModel {
 		GroupTypeID:   nestedIDString(row, "information", "groupTypeId"),
 		GroupStatusID: nestedIDString(row, "information", "groupStatusId"),
 		CampusID:      nestedIDString(row, "information", "campusId"),
+		InformLeader:  nestedBool(row, "settings", groupInformLeaderKey),
 	}
 }
 
@@ -216,6 +293,11 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	var cfgInformLeader types.Bool
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("inform_leader"), &cfgInformLeader)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	id := state.ID.ValueString()
 
 	// PATCH only what changed: it leaves everything else on the group (and
@@ -237,6 +319,9 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 			return
 		}
 		body[f.key] = v
+	}
+	if informLeaderManaged(cfgInformLeader) && !plan.InformLeader.Equal(state.InformLeader) {
+		body[groupInformLeaderKey] = plan.InformLeader.ValueBool()
 	}
 	// The migration goes first and is fully planned (roles, members, mapping) before
 	// any write, so a refusal leaves the group untouched.
@@ -290,6 +375,14 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 					"Konfiguration an den Wert an, der dort gilt.",
 					groupCollection, id, f.attr, groupDisplay(want), groupDisplay(f.get(got))))
 		}
+	}
+	if informLeaderManaged(cfgInformLeader) && !plan.InformLeader.Equal(got.InformLeader) {
+		resp.Diagnostics.AddError(
+			"ChurchTools hat die Änderung ignoriert",
+			fmt.Sprintf("Die Änderung an %s/%s mit inform_leader = %t wurde angenommen, die Gruppe steht danach "+
+				"aber auf %s. Prüfe in ChurchTools, ob dieses Feld für die Gruppe gesperrt ist, und passe die "+
+				"Konfiguration an den Wert an, der dort gilt.",
+				groupCollection, id, plan.InformLeader.ValueBool(), got.InformLeader))
 	}
 	if resp.Diagnostics.HasError() {
 		if typeChanged {

@@ -70,3 +70,13 @@ func nestedIDString(row map[string]any, parent, key string) types.String {
 	}
 	return types.StringNull()
 }
+
+// nestedBool reads row[parent][key] as a bool; absent or not a bool is
+// types.BoolNull() (unknown to us), never false.
+func nestedBool(row map[string]any, parent, key string) types.Bool {
+	obj, _ := row[parent].(map[string]any)
+	if b, ok := obj[key].(bool); ok {
+		return types.BoolValue(b)
+	}
+	return types.BoolNull()
+}

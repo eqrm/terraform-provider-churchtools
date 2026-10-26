@@ -36,6 +36,12 @@ type Server struct {
 	// lastPatch is the same for PATCH, so a test can assert that only the changed
 	// keys went over the wire (and that clearing a value sent an explicit null).
 	lastPatch map[string]map[string]any
+	// lastPost is the same for POST (the create body as sent).
+	lastPost map[string]map[string]any
+	// groupInformLeader is settings.informLeader of a group the mock creates.
+	// Live, a new group stands on false (eqrm-dev, 2026-10-26); a test sets it
+	// true to tell "the provider sent nothing" from "the provider sent false".
+	groupInformLeader bool
 	// ignoreOnPut lists, per "collection/id", keys a PUT answers 200 to but does
 	// not store. Live CT does this with isActive on built-in data fields such as
 	// job (19): the "Aktiv" checkbox is locked in its own UI, and the PUT reply
@@ -123,7 +129,7 @@ func (s *Server) RateLimitWhoami(n int, retryAfter string) {
 }
 
 func New() *Server {
-	s := &Server{rows: map[string]map[string]any{}, nextID: 1000, dropCreateID: map[string]bool{}, legacyRows: map[string]map[string]any{}, lastPut: map[string]map[string]any{}, lastPatch: map[string]map[string]any{}, ignoreOnPut: map[string]map[string]bool{}}
+	s := &Server{rows: map[string]map[string]any{}, nextID: 1000, dropCreateID: map[string]bool{}, legacyRows: map[string]map[string]any{}, lastPut: map[string]map[string]any{}, lastPatch: map[string]map[string]any{}, lastPost: map[string]map[string]any{}, ignoreOnPut: map[string]map[string]bool{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
 	return s
 }
@@ -199,6 +205,21 @@ func (s *Server) LastPut(collection string) map[string]any {
 	return out
 }
 
+// GroupInformLeaderDefault sets settings.informLeader of groups created from now on.
+func (s *Server) GroupInformLeaderDefault(v bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.groupInformLeader = v
+}
+
+// ClearLastPatch forgets the last PATCH to a collection, so a test can assert
+// that a step sent none.
+func (s *Server) ClearLastPatch(collection string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.lastPatch, collection)
+}
+
 // LastPatch returns a copy of the most recent PATCH body sent to a collection,
 // or nil if there was none.
 func (s *Server) LastPatch(collection string) map[string]any {
@@ -264,6 +285,20 @@ func (s *Server) IgnoreOnPut(collection string, id int, keys ...string) {
 // top-level request key (e.g. "campusId"), not the stored information.* name.
 func (s *Server) IgnoreOnPatch(collection string, id int, keys ...string) {
 	s.IgnoreOnPut(collection, id, keys...)
+}
+
+// LastPost returns the body of the most recent POST to a collection (nil if none).
+func (s *Server) LastPost(collection string) map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastPost[collection] == nil {
+		return nil
+	}
+	out := map[string]any{}
+	for k, v := range s.lastPost[collection] {
+		out[k] = v
+	}
+	return out
 }
 
 // Find returns the first row in a collection whose `field` equals `value`, so
@@ -595,13 +630,17 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost:
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
+		s.lastPost[collection] = map[string]any{}
+		for k, v := range body {
+			s.lastPost[collection][k] = v
+		}
 		if collection == "/groups" {
 			if missing := groupMissing(body); missing != "" {
 				w.WriteHeader(http.StatusBadRequest)
 				writeData(w, map[string]any{"message": "There are validation errors", "missing": missing})
 				return
 			}
-			body = groupRow(body)
+			body = groupRow(body, s.groupInformLeader)
 		}
 		s.nextID++
 		body["id"] = float64(s.nextID)
@@ -691,14 +730,20 @@ func groupMissing(body map[string]any) string {
 // groupRow turns a flat create request into CT's stored shape. campusId is
 // ALWAYS present in information, null when unset (eqrm-dev read probe,
 // 2026-10-16).
-func groupRow(body map[string]any) map[string]any {
+func groupRow(body map[string]any, informLeader bool) map[string]any {
 	info := map[string]any{"campusId": nil}
 	for _, k := range groupInfoKeys {
 		if v, ok := body[k]; ok {
 			info[k] = v
 		}
 	}
-	return map[string]any{"name": body["name"], "information": info}
+	// settings.informLeader is always served. POST ignores the flat key, as live
+	// CT does (eqrm-dev, 2026-10-26); only PATCH writes it.
+	return map[string]any{
+		"name":        body["name"],
+		"information": info,
+		"settings":    map[string]any{"informLeader": informLeader},
+	}
 }
 
 // applyGroupPatch merges a flat PATCH into the nested row. `campusId: null`
@@ -715,6 +760,15 @@ func applyGroupPatch(row, body map[string]any, ignored map[string]bool) {
 		}
 		if k == "name" {
 			row[k] = v
+			continue
+		}
+		if k == "informLeader" {
+			settings, _ := row["settings"].(map[string]any)
+			if settings == nil {
+				settings = map[string]any{}
+				row["settings"] = settings
+			}
+			settings[k] = v
 			continue
 		}
 		for _, ik := range groupInfoKeys {
