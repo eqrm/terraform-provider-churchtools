@@ -69,6 +69,9 @@ func TestGolden_GroupNoOp(t *testing.T) {
 				"groupStatusId": r.Fields["groupStatusId"],
 				"campusId":      campus,
 			},
+			// CT always serves settings.informLeader; the exporter output has no
+			// inform_leader, so it must plan empty whichever value CT holds.
+			"settings": map[string]any{"informLeader": r.ID%2 == 0},
 		})
 
 		fields := make([]string, 0, len(r.Fields))

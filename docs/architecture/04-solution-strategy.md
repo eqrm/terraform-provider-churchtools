@@ -16,7 +16,7 @@ resting place. The tier numbering comes from ct-cli's registry.
 | Tier | Content | State in this repo |
 |---|---|---|
 | 0 | Master data: campus, group type, department, person status, comment viewer, age/target group, relationship type, ... | Implemented (see [05](05-building-blocks.md)) |
-| 1 | Groups (`churchtools_group`: name, type, status, campus) | Implemented; hierarchy and dynamic rulesets follow as separate resources |
+| 1 | Groups (`churchtools_group`: name, type, status, campus, inform_leader) | Implemented; hierarchy and dynamic rulesets follow as separate resources |
 | 1.5 | Group member fields (must migrate before groups leave ct-cli state) | Planned |
 | 2 | Roles and grants, gated on a spike for partially managed lists | Spike: `group_role` with `preserve_unknown` (mock-tested, not yet live) |
 

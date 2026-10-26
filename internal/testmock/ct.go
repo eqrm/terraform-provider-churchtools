@@ -36,6 +36,8 @@ type Server struct {
 	// lastPatch is the same for PATCH, so a test can assert that only the changed
 	// keys went over the wire (and that clearing a value sent an explicit null).
 	lastPatch map[string]map[string]any
+	// lastPost is the same for POST (the create body as sent).
+	lastPost map[string]map[string]any
 	// ignoreOnPut lists, per "collection/id", keys a PUT answers 200 to but does
 	// not store. Live CT does this with isActive on built-in data fields such as
 	// job (19): the "Aktiv" checkbox is locked in its own UI, and the PUT reply
@@ -123,7 +125,7 @@ func (s *Server) RateLimitWhoami(n int, retryAfter string) {
 }
 
 func New() *Server {
-	s := &Server{rows: map[string]map[string]any{}, nextID: 1000, dropCreateID: map[string]bool{}, legacyRows: map[string]map[string]any{}, lastPut: map[string]map[string]any{}, lastPatch: map[string]map[string]any{}, ignoreOnPut: map[string]map[string]bool{}}
+	s := &Server{rows: map[string]map[string]any{}, nextID: 1000, dropCreateID: map[string]bool{}, legacyRows: map[string]map[string]any{}, lastPut: map[string]map[string]any{}, lastPatch: map[string]map[string]any{}, lastPost: map[string]map[string]any{}, ignoreOnPut: map[string]map[string]bool{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
 	return s
 }
@@ -264,6 +266,20 @@ func (s *Server) IgnoreOnPut(collection string, id int, keys ...string) {
 // top-level request key (e.g. "campusId"), not the stored information.* name.
 func (s *Server) IgnoreOnPatch(collection string, id int, keys ...string) {
 	s.IgnoreOnPut(collection, id, keys...)
+}
+
+// LastPost returns the body of the most recent POST to a collection (nil if none).
+func (s *Server) LastPost(collection string) map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastPost[collection] == nil {
+		return nil
+	}
+	out := map[string]any{}
+	for k, v := range s.lastPost[collection] {
+		out[k] = v
+	}
+	return out
 }
 
 // Find returns the first row in a collection whose `field` equals `value`, so
@@ -595,6 +611,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost:
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
+		s.lastPost[collection] = body
 		if collection == "/groups" {
 			if missing := groupMissing(body); missing != "" {
 				w.WriteHeader(http.StatusBadRequest)
@@ -698,7 +715,19 @@ func groupRow(body map[string]any) map[string]any {
 			info[k] = v
 		}
 	}
-	return map[string]any{"name": body["name"], "information": info}
+	// settings.informLeader is always served. The default is arbitrary (the live
+	// default is not probed); it is true so a test can tell "provider sent
+	// nothing" from "provider sent false". The request key is flat, the row nests
+	// it, same as the information ids; the flat key is an unverified assumption.
+	informLeader := true
+	if v, ok := body["informLeader"].(bool); ok {
+		informLeader = v
+	}
+	return map[string]any{
+		"name":        body["name"],
+		"information": info,
+		"settings":    map[string]any{"informLeader": informLeader},
+	}
 }
 
 // applyGroupPatch merges a flat PATCH into the nested row. `campusId: null`
@@ -715,6 +744,15 @@ func applyGroupPatch(row, body map[string]any, ignored map[string]bool) {
 		}
 		if k == "name" {
 			row[k] = v
+			continue
+		}
+		if k == "informLeader" {
+			settings, _ := row["settings"].(map[string]any)
+			if settings == nil {
+				settings = map[string]any{}
+				row["settings"] = settings
+			}
+			settings[k] = v
 			continue
 		}
 		for _, ik := range groupInfoKeys {
