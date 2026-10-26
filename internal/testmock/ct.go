@@ -38,6 +38,10 @@ type Server struct {
 	lastPatch map[string]map[string]any
 	// lastPost is the same for POST (the create body as sent).
 	lastPost map[string]map[string]any
+	// groupInformLeader is settings.informLeader of a group the mock creates.
+	// Live, a new group stands on false (eqrm-dev, 2026-10-26); a test sets it
+	// true to tell "the provider sent nothing" from "the provider sent false".
+	groupInformLeader bool
 	// ignoreOnPut lists, per "collection/id", keys a PUT answers 200 to but does
 	// not store. Live CT does this with isActive on built-in data fields such as
 	// job (19): the "Aktiv" checkbox is locked in its own UI, and the PUT reply
@@ -199,6 +203,21 @@ func (s *Server) LastPut(collection string) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// GroupInformLeaderDefault sets settings.informLeader of groups created from now on.
+func (s *Server) GroupInformLeaderDefault(v bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.groupInformLeader = v
+}
+
+// ClearLastPatch forgets the last PATCH to a collection, so a test can assert
+// that a step sent none.
+func (s *Server) ClearLastPatch(collection string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.lastPatch, collection)
 }
 
 // LastPatch returns a copy of the most recent PATCH body sent to a collection,
@@ -611,14 +630,17 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost:
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
-		s.lastPost[collection] = body
+		s.lastPost[collection] = map[string]any{}
+		for k, v := range body {
+			s.lastPost[collection][k] = v
+		}
 		if collection == "/groups" {
 			if missing := groupMissing(body); missing != "" {
 				w.WriteHeader(http.StatusBadRequest)
 				writeData(w, map[string]any{"message": "There are validation errors", "missing": missing})
 				return
 			}
-			body = groupRow(body)
+			body = groupRow(body, s.groupInformLeader)
 		}
 		s.nextID++
 		body["id"] = float64(s.nextID)
@@ -708,21 +730,15 @@ func groupMissing(body map[string]any) string {
 // groupRow turns a flat create request into CT's stored shape. campusId is
 // ALWAYS present in information, null when unset (eqrm-dev read probe,
 // 2026-10-16).
-func groupRow(body map[string]any) map[string]any {
+func groupRow(body map[string]any, informLeader bool) map[string]any {
 	info := map[string]any{"campusId": nil}
 	for _, k := range groupInfoKeys {
 		if v, ok := body[k]; ok {
 			info[k] = v
 		}
 	}
-	// settings.informLeader is always served. The default is arbitrary (the live
-	// default is not probed); it is true so a test can tell "provider sent
-	// nothing" from "provider sent false". The request key is flat, the row nests
-	// it, same as the information ids; the flat key is an unverified assumption.
-	informLeader := true
-	if v, ok := body["informLeader"].(bool); ok {
-		informLeader = v
-	}
+	// settings.informLeader is always served. POST ignores the flat key, as live
+	// CT does (eqrm-dev, 2026-10-26); only PATCH writes it.
 	return map[string]any{
 		"name":        body["name"],
 		"information": info,

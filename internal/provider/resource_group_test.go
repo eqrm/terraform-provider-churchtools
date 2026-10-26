@@ -402,11 +402,12 @@ func TestAccGroup_TypeMigrationKeepsNewTypeWhenVerifyFails(t *testing.T) {
 
 // inform_leader is Optional + Computed. Unset: never sent (create or update), no
 // diff, the value CT holds is read into state. Set: sent, read back, enforced.
-// The mock's default for a new group is true, so "unset" reads back true only if
-// the provider sent nothing.
+// The mock's default for a new group is set to true here, so "unset" reads back
+// true only if the provider sent nothing.
 func TestAccGroup_InformLeader(t *testing.T) {
 	mock := testmock.New()
 	defer mock.Close()
+	mock.GroupInformLeaderDefault(true)
 	const addr = "churchtools_group.g"
 
 	sent := func(want map[string]any) resource.TestCheckFunc {
@@ -459,10 +460,11 @@ func TestAccGroup_InformLeader(t *testing.T) {
 			{Config: cfg(`  inform_leader = false`), PlanOnly: true},
 			{
 				// Back to unset: the provider lets go, the value stays and nothing is sent.
-				Config: cfg(``),
+				PreConfig: func() { mock.ClearLastPatch("/groups") },
+				Config:    cfg(``),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(addr, "inform_leader", "false"),
-					sent(map[string]any{"informLeader": false}), held(false),
+					sent(nil), held(false),
 				),
 			},
 			{Config: cfg(``), PlanOnly: true},
@@ -500,23 +502,71 @@ func TestAccGroup_InformLeader(t *testing.T) {
 	})
 }
 
-// Set on create: sent in the POST body and read back.
+// Set on create: live CT ignores informLeader on POST, so it is not sent there
+// but PATCHed right after, and read back. A value CT already holds is not PATCHed.
 func TestAccGroup_InformLeaderOnCreate(t *testing.T) {
 	mock := testmock.New()
 	defer mock.Close()
+	notInPost := func(*terraform.State) error {
+		if _, has := mock.LastPost("/groups")["informLeader"]; has {
+			t.Error("informLeader was sent on POST, which live CT ignores")
+		}
+		return nil
+	}
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{
+				Config: groupConfig(mock.URL, "Gruppe IL2", `  inform_leader = true`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("churchtools_group.g", "inform_leader", "true"),
+					notInPost,
+					func(*terraform.State) error {
+						if got := mock.LastPatch("/groups"); !reflect.DeepEqual(got, map[string]any{"informLeader": true}) {
+							t.Errorf("PATCH body = %v, want only informLeader: true", got)
+						}
+						row := mock.Find("/groups", "name", "Gruppe IL2")
+						if got := row["settings"].(map[string]any)["informLeader"]; got != true {
+							t.Errorf("CT holds informLeader = %v, want true", got)
+						}
+						return nil
+					},
+				),
+			},
+			{Config: groupConfig(mock.URL, "Gruppe IL2", `  inform_leader = true`), PlanOnly: true},
+		},
+	})
+
+	mock2 := testmock.New()
+	defer mock2.Close()
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: protoV6(),
 		Steps: []resource.TestStep{{
-			Config: groupConfig(mock.URL, "Gruppe IL2", `  inform_leader = false`),
+			Config: groupConfig(mock2.URL, "Gruppe IL2b", `  inform_leader = false`),
 			Check: resource.ComposeTestCheckFunc(
 				resource.TestCheckResourceAttr("churchtools_group.g", "inform_leader", "false"),
 				func(*terraform.State) error {
-					if got := mock.LastPost("/groups")["informLeader"]; got != false {
-						t.Errorf("POST informLeader = %v, want false", got)
+					if got := mock2.LastPatch("/groups"); got != nil {
+						t.Errorf("PATCH %v sent although CT already holds false", got)
 					}
 					return nil
 				},
 			),
+		}},
+	})
+}
+
+// CT ignoring the PATCH that sets inform_leader on create fails the apply and
+// keeps the group in state on what CT holds.
+func TestAccGroup_InformLeaderOnCreateIgnoredFails(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	mock.IgnoreOnPatch("/groups", 1001, "informLeader") // the mock's first create id
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{{
+			Config:      groupConfig(mock.URL, "Gruppe IL4", `  inform_leader = true`),
+			ExpectError: regexp.MustCompile(`(?s)ChurchTools hat die.*ignoriert`),
 		}},
 	})
 }

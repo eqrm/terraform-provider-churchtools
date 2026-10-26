@@ -182,12 +182,16 @@ was empty and the plan warning listed the mapping. **Not verified live:** a migr
 with members in the group, and whether CT keeps a group's per-role grants
 (`churchtools_group_role`) across it.
 
-`inform_leader` on `churchtools_group` reads from `settings.informLeader` (seen in the
-OpenAPI GET response). Its write shape is **not verified live**: the spec documents no
-`PATCH /groups/{id}` body for it, so the provider sends a flat top-level `informLeader`,
-like the other group settings. If CT ignores that, the read-back after apply fails with
-"ChurchTools hat die Änderung ignoriert" instead of storing a wrong value. Left out of
-config the attribute is never sent.
+`inform_leader` on `churchtools_group` reads from `settings.informLeader` and writes a
+flat top-level `informLeader`. The OpenAPI spec documents no write body for it, so the
+contract was measured on eqrm-dev on 2026-10-26 with disposable groups, deleted
+afterwards: all 653 existing groups read `false`; a POST carrying `informLeader: true`
+answered 200 and the group stood on `false`, so **POST ignores it**; PATCH with
+`informLeader` set it to `true` and back to `false`, each read back. Create therefore never
+sends it, reads the new group and PATCHes it when config wants another value; that path
+then ran live too (set `true` on create: held, plan clean; left out: state took `false`,
+plan clean). Every write is read back, so a key CT ignores fails with "ChurchTools hat die
+Änderung ignoriert". Left out of config, the attribute is never sent.
 
 `group_role` (`/permissions/group_role/{pairingId}`, pairing resolved through
 `/groups/{id}/roles`) ran live on eqrm-dev on 2026-10-19 (sll_koblenz Mitglied,
