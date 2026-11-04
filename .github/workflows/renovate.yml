@@ -1,0 +1,58 @@
+# Self-hosted Renovate: runs the Renovate CLI in our own CI (GitHub-hosted
+# runner) under the eqrm-renovate GitHub App instead of granting the Mend cloud
+# app access to the repo. Config lives in ./renovate.json (Renovate auto-reads it).
+# Same setup as eqrm/churchtools-connector.
+#
+# Schedule: the workflow runs daily so vulnerability fixes (renovate.json
+# `vulnerabilityAlerts`, scheduled "at any time") land within ~24h. Routine
+# version updates are gated to Tuesday mornings inside renovate.json `schedule`.
+name: Renovate
+
+on:
+  schedule:
+    - cron: "0 4 * * *" # daily 04:00 UTC (~06:00 Europe/Berlin)
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: "Renovate log level"
+        required: false
+        default: "info"
+        type: choice
+        options:
+          - debug
+          - info
+          - warn
+
+# Only one Renovate run at a time; never cancel an in-flight run (it may be
+# mid-commit on a branch). `timeout-minutes` only stops a wedged runner.
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+
+# The job authenticates as the Renovate App, not GITHUB_TOKEN.
+permissions:
+  contents: read
+
+jobs:
+  renovate:
+    # GitHub-hosted on purpose: this job holds the Renovate App private key.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Generate Renovate App token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.RENOVATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
+          owner: eqrm
+          repositories: ${{ github.event.repository.name }}
+
+      - name: Run Renovate
+        uses: renovatebot/github-action@a63d9a7bc606f7336fd20b47f2f32259a35e6213 # v46.3.9
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+        env:
+          # Single-repo run; no org-wide autodiscovery.
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          LOG_LEVEL: ${{ inputs.logLevel || 'info' }}
