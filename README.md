@@ -310,6 +310,19 @@ behaviour. On 2026-10-20 all three ran live on eqrm-dev from this provider:
   hand-written row into state and left CT's baseline rows out; a `churchdb:view`
   grant was added and removed again, and the status ended with its original rows.
 
+`grow_path` (`/person/growpaths`) and `group_role_definition.grow_path_id` (2026-11-04): the
+CT contract (POST 201; PUT needs `name` and `color` and resets an omitted `sortKey` to 0, so
+the provider always sends it; 404 on an unknown id; DELETE 409 while roles reference the
+stage, `dryRun=true`, 204 for an unknown id) was measured on eqrm-dev and checked against the
+OpenAPI spec. **Mock-tested only**: the resource itself (create, update, import,
+`sort_key` kept on a rename, invalid colour refused at plan time, destroy un-manages without a
+DELETE), and `grow_path_id` sent on POST/PUT, read back, and carried through when the config
+leaves it out. The mock's DELETE/409 behaviour is pinned in a test but the provider never calls
+it. Not measured: the status code of a successful PUT (the mock answers 204; the provider does
+not parse it), and the provider has not yet run against dev. `grow_path_id` cannot be set to
+null: it is Optional+Computed, so removing it from the config keeps the live value. A change
+to a stage does not recalculate the growPathIds already stored on persons.
+
 Still **not verified live**:
 
 - `group_type_role`: whether dev accepts `isInherited` on write, and data-scoped

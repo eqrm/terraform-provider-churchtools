@@ -322,3 +322,94 @@ func TestAccGroupRoleDefinition_CreateReadBackFailureKeepsID(t *testing.T) {
 		},
 	})
 }
+
+// grow_path_id set in the config is sent on POST and PUT, stored, and read back;
+// changing it is an in-place update.
+func TestAccGroupRoleDefinition_GrowPathIDManaged(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	cfg := func(gp string) string {
+		return providerBlock(mock.URL) + fmt.Sprintf(`
+resource "churchtools_group_role_definition" "x" {
+  group_type_id = "9"
+  name          = "Mitarbeiter"
+  type          = "participant"
+  grow_path_id  = %s
+}
+`, gp)
+	}
+	const addr = "churchtools_group_role_definition.x"
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{
+				Config: cfg("4"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "grow_path_id", "4"),
+					func(*terraform.State) error {
+						if got := mock.LastPost("/group/roles")["growPathId"]; got != float64(4) {
+							return fmt.Errorf("POST growPathId = %v, want 4", got)
+						}
+						return nil
+					},
+				),
+			},
+			{Config: cfg("4"), PlanOnly: true},
+			{
+				Config: cfg("6"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{PreApply: []plancheck.PlanCheck{
+					plancheck.ExpectResourceAction(addr, plancheck.ResourceActionUpdate),
+				}},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "grow_path_id", "6"),
+					func(*terraform.State) error {
+						if got := mock.LastPut("/group/roles")["growPathId"]; got != float64(6) {
+							return fmt.Errorf("PUT growPathId = %v, want 6", got)
+						}
+						return nil
+					},
+				),
+			},
+			{Config: cfg("6"), PlanOnly: true},
+		},
+	})
+}
+
+// A config that does not set grow_path_id keeps the live value through an update
+// and plans clean, also after the growth path changed out of band.
+func TestAccGroupRoleDefinition_GrowPathUnsetKeepsLive(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedProdRole(mock)
+	cfg := func(name string) string { return providerBlock(mock.URL) + fmt.Sprintf(roleDefConfig, name) }
+	imp := "\nimport {\n  to = churchtools_group_role_definition.x\n  id = \"160\"\n}\n"
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: cfg("participant") + imp, Check: resource.TestCheckResourceAttr("churchtools_group_role_definition.x", "grow_path_id", "4")},
+			{Config: cfg("participant"), PlanOnly: true},
+			{
+				// changed in the UI meanwhile: the refresh adopts it, no diff
+				PreConfig: func() {
+					mock.Seed("/group/roles", 160, map[string]any{
+						"groupTypeId": float64(9), "name": "participant", "nameTranslated": "Teilnehmer",
+						"shorty": "Pa", "sortKey": float64(7), "type": "participant", "isDefault": true, "isHidden": true,
+						"growPathId": float64(5), "isLeader": false,
+					})
+				},
+				Config:   cfg("participant"),
+				PlanOnly: true,
+			},
+			{
+				Config: cfg("Teilnehmende"),
+				Check: func(*terraform.State) error {
+					if got := mock.LastPut("/group/roles")["growPathId"]; got != float64(5) {
+						return fmt.Errorf("PUT growPathId = %v, want the live 5", got)
+					}
+					return nil
+				},
+			},
+			{Config: cfg("Teilnehmende"), PlanOnly: true},
+		},
+	})
+}

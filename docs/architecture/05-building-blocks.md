@@ -47,6 +47,7 @@ All types are prefixed `churchtools_`. The authoritative list is `Resources()` i
 | `contact_label` | `/contactlabels` | REST, PUT |
 | `relationship_type` | `/person/relationshiptypes` | REST, PUT |
 | `target_group`, `age_group` | `/group/targetgroups`, `/group/agegroups` | REST, PUT answers 204 without a body |
+| `grow_path` | `/person/growpaths` | REST, PUT; Delete only un-manages (CT: 409 while roles reference it) |
 | `group_category` | `/group/groupcategories` | REST, PUT |
 | `db_field` | `/dbfields/{id}` | REST, import-only; Update GETs, then PUTs the full body ([README](../../README.md#what-is-verified-and-what-is-not)) |
 | `department` | read `/departments` | Legacy master data, table `cdb_bereich` |

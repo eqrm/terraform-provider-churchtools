@@ -51,7 +51,11 @@ type Server struct {
 	perm *permState
 	// roleMembers makes DELETE /group/roles/{id} answer 409 (roles.go).
 	roleMembers map[string]int
-	roleDeletes int
+	// growPathDeletes counts DELETEs that removed a growth path (growpaths.go).
+	growPathDeletes int
+	// growPathPutHook: see SetGrowPathPutHook (growpaths.go).
+	growPathPutHook func(row map[string]any)
+	roleDeletes     int
 	// failNextRoleGet and roleGetHook: see roles.go.
 	failNextRoleGet bool
 	roleGetHook     func(row map[string]any)
@@ -365,6 +369,13 @@ var supportedVerbs = map[string]map[string]bool{
 		http.MethodPost: true,
 		http.MethodPut:  true,
 	},
+	// Growth paths: full CRUD, see growpaths.go.
+	"/person/growpaths": {
+		http.MethodGet:    true,
+		http.MethodPost:   true,
+		http.MethodPut:    true,
+		http.MethodDelete: true,
+	},
 	// Both serve full CRUD on a live instance (CT 3.137 OpenAPI).
 	"/contactlabels": {
 		http.MethodGet:    true,
@@ -582,6 +593,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if collection == "/group/roles" && s.handleRoleWrite(w, r, id) {
+		return
+	}
+	if collection == growPathCollection && s.handleGrowPathWrite(w, r, id) {
 		return
 	}
 
