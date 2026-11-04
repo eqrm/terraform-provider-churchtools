@@ -75,6 +75,7 @@ func (s *Server) handleRoleWrite(w http.ResponseWriter, r *http.Request, id stri
 	case http.MethodPost:
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
+		s.lastPost["/group/roles"] = body
 		if missing := missingKeys(body, roleRequired); len(missing) > 0 {
 			w.WriteHeader(http.StatusBadRequest)
 			writeData(w, map[string]any{"message": "There are validation errors", "missing": missing})

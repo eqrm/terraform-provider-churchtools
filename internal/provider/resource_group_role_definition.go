@@ -32,8 +32,12 @@ import (
 //   - Delete only un-manages, like the other resources: the role is dropped from
 //     state with a warning and never deleted in CT (see Delete).
 //   - PUT is not partial: Update reads the live role, overlays the planned
-//     values and sends the whole object, so shorty and growPathId that this
-//     configuration does not manage survive.
+//     values and sends the whole object, so shorty, growPathId and the other
+//     fields that this configuration does not manage survive.
+//   - grow_path_id (the Wachstumspfad stage, churchtools_grow_path) is managed
+//     only when set. Left out, the live value is carried through on every write.
+//     It is Optional+Computed, so an explicit null cannot be told from "left
+//     out": removing a growth path from a role is done in ChurchTools.
 type groupRoleDefinitionResource struct{ client *client.Client }
 
 type groupRoleDefinitionModel struct {
@@ -135,9 +139,11 @@ func (r *groupRoleDefinitionResource) Schema(_ context.Context, _ resource.Schem
 					"accept it on write, and it differs between users, so it is never compared.",
 			},
 			"grow_path_id": schema.Int64Attribute{
-				Computed: true,
-				Description: "Growth path of the role, null for none. Read-only here: never written by this " +
-					"resource, but passed through unchanged on every update.",
+				Optional: true, Computed: true,
+				Description: "Id of the growth path stage (churchtools_grow_path.x.id as a number) that members of " +
+					"this role reach; ChurchTools picks the stage with the higher sort_key among a person's roles. " +
+					"Left out: the live value is kept (null for none). Removing the attribute does not clear a stage " +
+					"that is set, and null cannot be configured; clear it in ChurchTools.",
 				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
 			},
 		},
@@ -209,7 +215,10 @@ func (m groupRoleDefinitionModel) writeBody(base client.Row) (client.Row, error)
 		"sortKey":     intField(base, "sortKey"),
 		"isDefault":   boolField(base, "isDefault"),
 		"isHidden":    boolField(base, "isHidden"),
-		"growPathId":  base["growPathId"], // never managed: null stays null
+		"growPathId":  base["growPathId"], // left out of the config: the live value (null stays null)
+	}
+	if !m.GrowPathID.IsUnknown() && !m.GrowPathID.IsNull() {
+		body["growPathId"] = m.GrowPathID.ValueInt64()
 	}
 	if !m.GroupTypeID.IsUnknown() && !m.GroupTypeID.IsNull() {
 		n, err := strconv.ParseInt(m.GroupTypeID.ValueString(), 10, 64)
@@ -251,6 +260,7 @@ func (m groupRoleDefinitionModel) verify(live client.Row) error {
 	chk("shorty", m.Shorty.ValueString(), stringField(live, "shorty"), known(m.Shorty))
 	chk("is_default", m.IsDefault.ValueBool(), boolField(live, "isDefault"), known(m.IsDefault))
 	chk("is_hidden", m.IsHidden.ValueBool(), boolField(live, "isHidden"), known(m.IsHidden))
+	chk("grow_path_id", m.GrowPathID.ValueInt64(), intField(live, "growPathId"), known(m.GrowPathID))
 	if len(diff) > 0 {
 		return fmt.Errorf("ChurchTools hat die Rolle angenommen, aber nicht so gespeichert (%s)", strings.Join(diff, "; "))
 	}
@@ -268,7 +278,7 @@ func (r *groupRoleDefinitionResource) Create(ctx context.Context, req resource.C
 	}
 	const summary = "Rolle konnte nicht angelegt werden"
 	// Create defaults mirror ct-cli's registry: shorty from the name, a
-	// participant-free sortKey 0, nothing default, nothing hidden, no growth path.
+	// participant-free sortKey 0, nothing default, nothing hidden; no growth path unless grow_path_id is set.
 	base := client.Row{
 		"shorty":     truncatePadded(plan.Name.ValueString(), 10, 1),
 		"sortKey":    float64(0),
@@ -311,7 +321,9 @@ func (r *groupRoleDefinitionResource) Create(ctx context.Context, req resource.C
 			saved.IsHidden = types.BoolNull()
 		}
 		saved.NameTranslated = types.StringNull()
-		saved.GrowPathID = types.Int64Null()
+		if saved.GrowPathID.IsUnknown() {
+			saved.GrowPathID = types.Int64Null()
+		}
 		resp.Diagnostics.Append(resp.State.Set(ctx, saved)...)
 		resp.Diagnostics.AddError(summary, fmt.Sprintf("Rolle %s nach dem Anlegen nicht lesbar: %s", id, err))
 		return
@@ -386,6 +398,9 @@ func (r *groupRoleDefinitionResource) Update(ctx context.Context, req resource.U
 	}
 	if config.IsHidden.IsNull() {
 		plan.IsHidden = types.BoolNull()
+	}
+	if config.GrowPathID.IsNull() {
+		plan.GrowPathID = types.Int64Null()
 	}
 	body, err := plan.writeBody(live)
 	if err != nil {

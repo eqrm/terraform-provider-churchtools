@@ -202,6 +202,7 @@ func (p *churchtoolsProvider) Resources(_ context.Context) []func() resource.Res
 		NewPrivacyAgreementWhoResource,
 		NewTargetGroupResource,
 		NewAgeGroupResource,
+		NewGrowPathResource,
 		NewGroupCategoryResource,
 		NewDBFieldResource,
 		NewGroupResource,
