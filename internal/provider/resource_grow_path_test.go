@@ -96,6 +96,24 @@ func TestAccGrowPath_SortKeySurvivesUpdate(t *testing.T) {
 	})
 }
 
+// CT accepts the PUT but stores another name: the read-back turns that into an
+// apply error instead of writing the plan into state.
+func TestAccGrowPath_ReadBackCatchesDivergence(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: growPathCfg(mock, "Friend", "sky", "")},
+			{
+				PreConfig:   func() { mock.SetGrowPathPutHook(func(row map[string]any) { row["name"] = "Frien" }) },
+				Config:      growPathCfg(mock, "Friend 2", "sky", ""),
+				ExpectError: regexp.MustCompile(`nicht so gespeichert`),
+			},
+		},
+	})
+}
+
 func TestAccGrowPath_GoneInCTLeavesState(t *testing.T) {
 	mock := testmock.New()
 	defer mock.Close()

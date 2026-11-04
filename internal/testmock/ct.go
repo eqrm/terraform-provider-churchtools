@@ -53,6 +53,8 @@ type Server struct {
 	roleMembers map[string]int
 	// growPathDeletes counts DELETEs that removed a growth path (growpaths.go).
 	growPathDeletes int
+	// growPathPutHook: see SetGrowPathPutHook (growpaths.go).
+	growPathPutHook func(row map[string]any)
 	roleDeletes     int
 	// failNextRoleGet and roleGetHook: see roles.go.
 	failNextRoleGet bool

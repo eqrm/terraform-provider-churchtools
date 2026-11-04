@@ -2,6 +2,7 @@ package testmock
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"strconv"
 )
@@ -48,7 +49,7 @@ func growPathInvalid(body map[string]any) string {
 		return "color: invalid value"
 	}
 	if v, ok := body["sortKey"]; ok {
-		if f, isNum := v.(float64); !isNum || f < 0 {
+		if f, isNum := v.(float64); !isNum || f < 0 || f != math.Trunc(f) {
 			return "sortKey: must be an integer >= 0"
 		}
 	}
@@ -112,6 +113,9 @@ func (s *Server) handleGrowPathWrite(w http.ResponseWriter, r *http.Request, id 
 			sortKey = v
 		}
 		cur["name"], cur["color"], cur["sortKey"] = body["name"], body["color"], sortKey
+		if s.growPathPutHook != nil {
+			s.growPathPutHook(cur)
+		}
 		w.WriteHeader(http.StatusNoContent)
 		return true
 	case http.MethodDelete:
@@ -135,4 +139,12 @@ func (s *Server) handleGrowPathWrite(w http.ResponseWriter, r *http.Request, id 
 		return true
 	}
 	return false
+}
+
+// SetGrowPathPutHook runs fn on the stored row after every successful PUT, so a
+// test can make CT store something other than what was sent.
+func (s *Server) SetGrowPathPutHook(fn func(row map[string]any)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.growPathPutHook = fn
 }

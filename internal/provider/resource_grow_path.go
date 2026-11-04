@@ -2,12 +2,12 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/eqrm/terraform-provider-churchtools/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -154,7 +154,7 @@ func (r *growPathResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 	plan.ID = types.StringValue(id)
-	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+	r.readBack(ctx, plan, "angelegt", resp.State.Set, &resp.Diagnostics)
 }
 
 func (r *growPathResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -167,7 +167,7 @@ func (r *growPathResource) Read(ctx context.Context, req resource.ReadRequest, r
 		return
 	}
 	row, err := r.client.Get(ctx, growPathCollection, state.ID.ValueString())
-	if errors.Is(err, client.ErrNotFound) || isNotFound(err) {
+	if isNotFound(err) {
 		resp.State.RemoveResource(ctx)
 		return
 	}
@@ -189,15 +189,43 @@ func (r *growPathResource) Update(ctx context.Context, req resource.UpdateReques
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	// sort_key is never unknown here: UseStateForUnknown carries the state value.
 	plan.ID = state.ID
-	if plan.SortKey.IsUnknown() || plan.SortKey.IsNull() {
-		plan.SortKey = state.SortKey
-	}
 	if _, err := r.client.Update(ctx, growPathCollection, state.ID.ValueString(), "PUT", plan.body()); err != nil {
 		resp.Diagnostics.AddError("Wachstumspfad-Stufe konnte nicht geändert werden", err.Error())
 		return
 	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+	r.readBack(ctx, plan, "geändert", resp.State.Set, &resp.Diagnostics)
+}
+
+// readBack reads the stage after a write and checks that CT stored what the
+// plan asked for. The PUT reply is not parsed (its status was never measured
+// live), so the GET is what proves the write.
+func (r *growPathResource) readBack(ctx context.Context, plan growPathModel, verb string,
+	set func(context.Context, any) diag.Diagnostics, diags *diag.Diagnostics) {
+	live, err := r.client.Get(ctx, growPathCollection, plan.ID.ValueString())
+	if err != nil {
+		diags.AddError("Wachstumspfad-Stufe "+verb+", aber nicht lesbar", err.Error())
+		return
+	}
+	var got growPathModel
+	got.fromRow(live)
+	var diff []string
+	if got.Name.ValueString() != plan.Name.ValueString() {
+		diff = append(diff, fmt.Sprintf("name: geplant %q, gespeichert %q", plan.Name.ValueString(), got.Name.ValueString()))
+	}
+	if got.Color.ValueString() != plan.Color.ValueString() {
+		diff = append(diff, fmt.Sprintf("color: geplant %q, gespeichert %q", plan.Color.ValueString(), got.Color.ValueString()))
+	}
+	if got.SortKey.ValueInt64() != plan.SortKey.ValueInt64() {
+		diff = append(diff, fmt.Sprintf("sort_key: geplant %d, gespeichert %d", plan.SortKey.ValueInt64(), got.SortKey.ValueInt64()))
+	}
+	if len(diff) > 0 {
+		diags.AddError("Wachstumspfad-Stufe "+verb+", aber nicht so gespeichert",
+			"ChurchTools hat die Stufe angenommen, aber nicht so gespeichert ("+strings.Join(diff, "; ")+").")
+		return
+	}
+	diags.Append(set(ctx, plan)...)
 }
 
 // Delete only drops the stage from Terraform state, like every resource here.
