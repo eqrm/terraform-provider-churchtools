@@ -58,6 +58,7 @@ type permState struct {
 	authTableFails bool
 	authTableCalls int
 	writes         []string
+	rolePatches    []map[string]any // PATCH bodies on /groups/{id}/roles/{roleId}
 }
 
 func (s *Server) perms() *permState {
@@ -122,7 +123,7 @@ func (s *Server) SeedGroupRoles(groupID int, roles map[string]int) {
 	defer s.mu.Unlock()
 	var rows []map[string]any
 	for name, id := range roles {
-		rows = append(rows, map[string]any{"id": id, "name": name, "nameTranslated": name, "groupTypeRoleId": id % 100})
+		rows = append(rows, map[string]any{"id": id, "name": name, "nameTranslated": name, "groupTypeRoleId": id % 100, "growPathId": nil})
 		if _, ok := s.perms().rows[strconv.Itoa(id)]; !ok {
 			s.perms().rows[strconv.Itoa(id)] = nil
 		}
@@ -234,6 +235,9 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) bool 
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api"), "/"), "/")
 	ps := s.perms()
 	switch {
+	case len(parts) == 4 && parts[0] == "groups" && parts[2] == "roles":
+		s.patchGroupRole(w, r, parts[1], parts[3])
+		return true
 	case len(parts) == 3 && parts[0] == "groups" && parts[2] == "roles":
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -388,4 +392,84 @@ func writeLog(method string, auth int64, inherited bool, ids []int64) string {
 		s += " [" + strings.Join(strs, ",") + "]"
 	}
 	return s
+}
+
+// patchGroupRole serves PATCH /groups/{groupId}/roles/{roleId}, the per-group
+// role settings (OpenAPI "Save role specific settings for this group"). Assumed,
+// not measured live: partial bodies are accepted, an unknown role answers 404,
+// growPathId takes an int or null, and the reply is not parsed by the provider.
+// Only growPathId is stored; the other documented keys (isActive, canReadChat,
+// ...) are accepted and ignored. Caller holds s.mu.
+func (s *Server) patchGroupRole(w http.ResponseWriter, r *http.Request, groupID, roleID string) {
+	if r.Method != http.MethodPatch {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		writeData(w, map[string]any{"message": "no " + r.Method + " on /groups/{id}/roles/{roleId}"})
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		writeData(w, map[string]any{"message": "invalid body"})
+		return
+	}
+	ps := s.perms()
+	for _, row := range ps.groupRoles[groupID] {
+		if strconv.Itoa(row["id"].(int)) != roleID {
+			continue
+		}
+		ps.rolePatches = append(ps.rolePatches, body)
+		if v, ok := body["growPathId"]; ok {
+			switch n := v.(type) {
+			case nil:
+				row["growPathId"] = nil
+			case float64:
+				row["growPathId"] = int(n)
+			default:
+				w.WriteHeader(http.StatusBadRequest)
+				writeData(w, map[string]any{"message": "growPathId must be an integer or null"})
+				return
+			}
+		}
+		writeData(w, row)
+		return
+	}
+	w.WriteHeader(http.StatusNotFound)
+	writeData(w, map[string]any{"message": "group role not found"})
+}
+
+// SeedGroupRoleGrowPath sets a pairing's growPathId (nil = none), e.g. to
+// simulate a change made in the CT UI between two plans.
+func (s *Server) SeedGroupRoleGrowPath(groupID, pairingID int, growPathID *int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, row := range s.perms().groupRoles[strconv.Itoa(groupID)] {
+		if row["id"].(int) == pairingID {
+			if growPathID == nil {
+				row["growPathId"] = nil
+			} else {
+				row["growPathId"] = *growPathID
+			}
+		}
+	}
+}
+
+// GroupRolePatches returns the bodies of every PATCH /groups/{id}/roles/{roleId}.
+func (s *Server) GroupRolePatches() []map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]map[string]any(nil), s.perms().rolePatches...)
+}
+
+// GroupRoleGrowPath returns a pairing's stored growPathId (nil = none).
+func (s *Server) GroupRoleGrowPath(groupID, pairingID int) *int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, row := range s.perms().groupRoles[strconv.Itoa(groupID)] {
+		if row["id"].(int) == pairingID {
+			if v, ok := row["growPathId"].(int); ok {
+				return &v
+			}
+		}
+	}
+	return nil
 }

@@ -37,7 +37,9 @@ import (
 //   - grow_path_id (the Wachstumspfad stage, churchtools_grow_path) is managed
 //     only when set. Left out, the live value is carried through on every write.
 //     It is Optional+Computed, so an explicit null cannot be told from "left
-//     out": removing a growth path from a role is done in ChurchTools.
+//     out": clearing a stage is the separate switch clear_grow_path = true,
+//     which sends growPathId: null (integer|null in the OpenAPI, see
+//     grow_path_clear.go).
 type groupRoleDefinitionResource struct{ client *client.Client }
 
 type groupRoleDefinitionModel struct {
@@ -51,6 +53,7 @@ type groupRoleDefinitionModel struct {
 	IsHidden       types.Bool   `tfsdk:"is_hidden"`
 	NameTranslated types.String `tfsdk:"name_translated"`
 	GrowPathID     types.Int64  `tfsdk:"grow_path_id"`
+	ClearGrowPath  types.Bool   `tfsdk:"clear_grow_path"`
 }
 
 func NewGroupRoleDefinitionResource() resource.Resource { return &groupRoleDefinitionResource{} }
@@ -143,9 +146,10 @@ func (r *groupRoleDefinitionResource) Schema(_ context.Context, _ resource.Schem
 				Description: "Id of the growth path stage (churchtools_grow_path.x.id as a number) that members of " +
 					"this role reach; ChurchTools picks the stage with the higher sort_key among a person's roles. " +
 					"Left out: the live value is kept (null for none). Removing the attribute does not clear a stage " +
-					"that is set, and null cannot be configured; clear it in ChurchTools.",
-				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
+					"that is set, and null cannot be configured; use clear_grow_path = true to clear it.",
+				PlanModifiers: []planmodifier.Int64{growPathPlan()},
 			},
+			"clear_grow_path": clearGrowPathAttribute(),
 		},
 	}
 }
@@ -160,6 +164,7 @@ func (r *groupRoleDefinitionResource) ValidateConfig(ctx context.Context, req re
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	validateGrowPathClear(m.GrowPathID, m.ClearGrowPath, &resp.Diagnostics)
 	if !m.Type.IsUnknown() && !m.Type.IsNull() && m.Type.ValueString() != "leader" && m.Type.ValueString() != "participant" {
 		resp.Diagnostics.AddAttributeError(path.Root("type"), "Ungültiger Rollentyp",
 			fmt.Sprintf("%q: ChurchTools kennt nur \"leader\" und \"participant\".", m.Type.ValueString()))
@@ -220,6 +225,9 @@ func (m groupRoleDefinitionModel) writeBody(base client.Row) (client.Row, error)
 	if !m.GrowPathID.IsUnknown() && !m.GrowPathID.IsNull() {
 		body["growPathId"] = m.GrowPathID.ValueInt64()
 	}
+	if m.ClearGrowPath.ValueBool() {
+		body["growPathId"] = nil
+	}
 	if !m.GroupTypeID.IsUnknown() && !m.GroupTypeID.IsNull() {
 		n, err := strconv.ParseInt(m.GroupTypeID.ValueString(), 10, 64)
 		if err != nil {
@@ -261,6 +269,11 @@ func (m groupRoleDefinitionModel) verify(live client.Row) error {
 	chk("is_default", m.IsDefault.ValueBool(), boolField(live, "isDefault"), known(m.IsDefault))
 	chk("is_hidden", m.IsHidden.ValueBool(), boolField(live, "isHidden"), known(m.IsHidden))
 	chk("grow_path_id", m.GrowPathID.ValueInt64(), intField(live, "growPathId"), known(m.GrowPathID))
+	if m.ClearGrowPath.ValueBool() {
+		if _, set := live["growPathId"].(float64); set {
+			diff = append(diff, fmt.Sprintf("clear_grow_path: geplant keine Stufe, gespeichert %v", live["growPathId"]))
+		}
+	}
 	if len(diff) > 0 {
 		return fmt.Errorf("ChurchTools hat die Rolle angenommen, aber nicht so gespeichert (%s)", strings.Join(diff, "; "))
 	}

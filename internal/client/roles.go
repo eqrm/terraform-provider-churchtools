@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 )
 
@@ -16,6 +17,19 @@ const GroupRolesCollection = "/group/roles"
 // afterwards.
 func (c *Client) PutGroupRole(ctx context.Context, id string, body Row) error {
 	_, err := c.doItem(ctx, http.MethodPut, GroupRolesCollection, id, body)
+	return err
+}
+
+// PatchGroupRole sends PATCH /groups/{groupId}/roles/{roleId} ("Save role
+// specific settings for this group"). roleId is the per-group role id that
+// GET /groups/{groupId}/roles returns as `id`, not the type-level role id. The
+// body is partial: callers send only the keys they manage. The reply is not
+// decoded; callers read the row back.
+func (c *Client) PatchGroupRole(ctx context.Context, groupID, roleID string, body Row) error {
+	if groupID == "" {
+		return fmt.Errorf("%w: PATCH /groups/{id}/roles/{roleId}", ErrNoID)
+	}
+	_, err := c.doItem(ctx, http.MethodPatch, "/groups/"+groupID+"/roles", roleID, body)
 	return err
 }
 

@@ -3,6 +3,10 @@ resource "churchtools_group_role" "sll_koblenz_mitglied" {
   group_id = churchtools_group.sll_koblenz.id
   role     = "Mitglied" # CT's `name`, not the translated label
 
+  # Wachstumspfad stage of this role in this group only. Left out: unmanaged.
+  # `clear_grow_path = true` instead means "no stage" (the two exclude each other).
+  # grow_path_id = tonumber(churchtools_grow_path.friend.id)
+
   # Grants on these dimensions that are not declared below are left alone
   # (reports and templates are handed out by hand in the UI). Every other
   # undeclared grant is planned for revocation.

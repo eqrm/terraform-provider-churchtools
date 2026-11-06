@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/eqrm/terraform-provider-churchtools/internal/client"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -24,6 +25,14 @@ import (
 // It does not create anything in ChurchTools. CT creates a pairing for every
 // role of the group's type when the group is created, so Create resolves the
 // pairing by role name and writes the declared grants onto it.
+//
+// grow_path_id is the one per-group setting here that is not a grant: the
+// Wachstumspfad stage of this role in this group, stored on the same
+// /groups/{id}/roles row and written with PATCH /groups/{id}/roles/{roleId}
+// (partial: only growPathId is sent, the row's other settings are untouched).
+// Like group_role_definition's it is Optional+Computed: managed only when set,
+// the live value kept and never compared when left out, and removing it does not
+// clear a stage (see the attribute description).
 //
 // The hard part is preserve_unknown (eqrm/ct-cli#102, spec "preserveUnknown"):
 // Terraform revokes whatever is in state and not in config, and has no notion of
@@ -42,6 +51,8 @@ type groupRoleModel struct {
 	PreserveUnknown types.Set    `tfsdk:"preserve_unknown"`
 	PreservedGrants types.Set    `tfsdk:"preserved_grants"`
 	Grants          types.Set    `tfsdk:"grant"`
+	GrowPathID      types.Int64  `tfsdk:"grow_path_id"`
+	ClearGrowPath   types.Bool   `tfsdk:"clear_grow_path"`
 }
 
 func (m *groupRoleModel) data() *grantsData {
@@ -89,6 +100,16 @@ func (r *groupRoleResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			"\"Mitglied\", \"Leiter\", \"participant\"), not the translated label.",
 		PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 	}
+	attrs["grow_path_id"] = schema.Int64Attribute{
+		Optional: true, Computed: true,
+		Description: "Id of the growth path stage (churchtools_grow_path.x.id as a number) that members of " +
+			"this role reach in this group only; the type-level default is group_role_definition.grow_path_id. " +
+			"ChurchTools picks the stage with the higher sort_key among a person's roles. Left out: the live " +
+			"value is kept (null for none) and never compared. Removing the attribute does not clear a stage " +
+			"that is set, and null cannot be configured; use clear_grow_path = true to clear it.",
+		PlanModifiers: []planmodifier.Int64{growPathPlan()},
+	}
+	attrs["clear_grow_path"] = clearGrowPathAttribute()
 	resp.Schema = schema.Schema{
 		Description: "Die Rechte einer Rolle in einer Gruppe („Rechte verwalten“ an der Gruppe). " +
 			"Jedes nicht deklarierte Recht wird entzogen, außer auf den Dimensionen in preserve_unknown.",
@@ -109,6 +130,7 @@ func (r *groupRoleResource) ValidateConfig(ctx context.Context, req resource.Val
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	validateGrowPathClear(m.GrowPathID, m.ClearGrowPath, &resp.Diagnostics)
 	validatePreserve(m.PreserveUnknown, path.Root("preserve_unknown"), &resp.Diagnostics)
 	validateGrants(ctx, groupRoleKind, m.Grants, &resp.Diagnostics)
 }
@@ -117,47 +139,96 @@ func (r *groupRoleResource) ValidateConfig(ctx context.Context, req resource.Val
 
 var errGroupGone = errors.New("group gone")
 
-// resolvePairing finds the (group, role) pairing id: by id when known (Read),
+// pairing is one /groups/{id}/roles row, reduced to what this resource uses.
+type pairing struct {
+	id, name string
+	growPath types.Int64
+}
+
+func pairingOf(row map[string]any) pairing {
+	p := pairing{id: idString(row["id"]), name: stringField(row, "name"), growPath: types.Int64Null()}
+	if _, ok := row["growPathId"].(float64); ok {
+		p.growPath = types.Int64Value(intField(row, "growPathId"))
+	}
+	return p
+}
+
+// resolvePairing finds the (group, role) pairing: by id when known (Read),
 // by role name otherwise (Create, import). It returns errGroupGone for a group
-// that 404s and "" for a pairing that no longer exists.
-func (r *groupRoleResource) resolvePairing(ctx context.Context, groupID, role, id string) (string, string, error) {
+// that 404s and a zero pairing (id "") for one that no longer exists.
+func (r *groupRoleResource) resolvePairing(ctx context.Context, groupID, role, id string) (pairing, error) {
 	rows, err := r.client.GroupRoles(ctx, groupID)
 	var se *client.StatusError
 	if errors.As(err, &se) && se.Status == http.StatusNotFound {
-		return "", "", errGroupGone
+		return pairing{}, errGroupGone
 	}
 	if err != nil {
-		return "", "", err
+		return pairing{}, err
 	}
 	if id != "" {
 		for _, row := range rows {
 			if idString(row["id"]) == id {
-				return id, stringField(row, "name"), nil
+				return pairingOf(row), nil
 			}
 		}
-		return "", "", nil
+		return pairing{}, nil
 	}
 	var names []string
-	var match []string
+	var match []pairing
 	for _, row := range rows {
 		names = append(names, strconv.Quote(stringField(row, "name")))
 		if stringField(row, "name") == role {
-			match = append(match, idString(row["id"]))
+			match = append(match, pairingOf(row))
 		}
 	}
 	switch len(match) {
 	case 1:
-		if match[0] == "" {
-			return "", "", fmt.Errorf("die Rolle %q der Gruppe %s hat keine id", role, groupID)
+		if match[0].id == "" {
+			return pairing{}, fmt.Errorf("die Rolle %q der Gruppe %s hat keine id", role, groupID)
 		}
-		return match[0], role, nil
+		return match[0], nil
 	case 0:
 		sort.Strings(names)
-		return "", "", fmt.Errorf("die Gruppe %s hat keine Rolle %q (vorhanden: %s). Der Name muss "+
+		return pairing{}, fmt.Errorf("die Gruppe %s hat keine Rolle %q (vorhanden: %s). Der Name muss "+
 			"dem Feld name in ChurchTools entsprechen, nicht der Übersetzung", groupID, role, strings.Join(names, ", "))
 	default:
-		return "", "", fmt.Errorf("die Gruppe %s hat %d Rollen namens %q", groupID, len(match), role)
+		return pairing{}, fmt.Errorf("die Gruppe %s hat %d Rollen namens %q", groupID, len(match), role)
 	}
+}
+
+// writeGrowPath PATCHes growPathId when the plan sets a value that differs from
+// the live one, then reads the row back: only the read-back proves what CT
+// stored. It returns the live value for state. Unset or equal: no request.
+func (r *groupRoleResource) writeGrowPath(ctx context.Context, m groupRoleModel, p pairing, summary string, diags *diag.Diagnostics) (types.Int64, bool) {
+	want := m.GrowPathID
+	var value any = want.ValueInt64()
+	if m.ClearGrowPath.ValueBool() {
+		want, value = types.Int64Null(), nil
+	} else if want.IsUnknown() || want.IsNull() {
+		return p.growPath, true
+	}
+	if p.growPath.Equal(want) {
+		return p.growPath, true
+	}
+	label := m.label(m.Role.ValueString())
+	if err := r.client.PatchGroupRole(ctx, m.GroupID.ValueString(), p.id, client.Row{"growPathId": value}); err != nil {
+		diags.AddError(summary, fmt.Sprintf("%s: %v", label, err))
+		return types.Int64Null(), false
+	}
+	back, err := r.resolvePairing(ctx, m.GroupID.ValueString(), "", p.id)
+	if err == nil && back.id == "" {
+		err = errors.New("die Rolle ist nach dem Schreiben nicht mehr lesbar")
+	}
+	if err != nil {
+		diags.AddError(summary, fmt.Sprintf("%s: %v", label, err))
+		return types.Int64Null(), false
+	}
+	if !back.growPath.Equal(want) {
+		diags.AddError(summary, fmt.Sprintf("%s: grow_path_id %s wurde geschrieben, ChurchTools liefert %s zurück",
+			label, want, back.growPath))
+		return types.Int64Null(), false
+	}
+	return back.growPath, true
 }
 
 // --- CRUD ---
@@ -172,7 +243,7 @@ func (r *groupRoleResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 	const summary = "Rollenrechte konnten nicht gesetzt werden"
-	id, _, err := r.resolvePairing(ctx, plan.GroupID.ValueString(), plan.Role.ValueString(), "")
+	p, err := r.resolvePairing(ctx, plan.GroupID.ValueString(), plan.Role.ValueString(), "")
 	if errors.Is(err, errGroupGone) {
 		err = fmt.Errorf("die Gruppe %s existiert nicht", plan.GroupID.ValueString())
 	}
@@ -180,11 +251,17 @@ func (r *groupRoleResource) Create(ctx context.Context, req resource.CreateReque
 		resp.Diagnostics.AddError(summary, err.Error())
 		return
 	}
+	id := p.id
+	gp, ok := r.writeGrowPath(ctx, plan, p, summary, &resp.Diagnostics)
+	if !ok {
+		return
+	}
 	d := plan.data()
 	if !r.svc().create(ctx, id, plan.label(plan.Role.ValueString()), summary, d, &resp.Diagnostics) {
 		return
 	}
 	plan.setData(d)
+	plan.GrowPathID = gp
 	plan.ID = types.StringValue(id)
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
@@ -198,7 +275,8 @@ func (r *groupRoleResource) Read(ctx context.Context, req resource.ReadRequest, 
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	id, role, err := r.resolvePairing(ctx, state.GroupID.ValueString(), state.Role.ValueString(), state.ID.ValueString())
+	p, err := r.resolvePairing(ctx, state.GroupID.ValueString(), state.Role.ValueString(), state.ID.ValueString())
+	id, role := p.id, p.name
 	if errors.Is(err, errGroupGone) || (err == nil && id == "") {
 		resp.State.RemoveResource(ctx)
 		return
@@ -217,6 +295,7 @@ func (r *groupRoleResource) Read(ctx context.Context, req resource.ReadRequest, 
 		return
 	}
 	state.setData(d)
+	state.GrowPathID = p.growPath
 	state.ID = types.StringValue(id)
 	state.Role = types.StringValue(role)
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
@@ -237,7 +316,21 @@ func (r *groupRoleResource) Update(ctx context.Context, req resource.UpdateReque
 		"Rollenrechte konnten nicht geändert werden", pd, state.data(), &resp.Diagnostics) {
 		return
 	}
+	const summary = "Rollenrechte konnten nicht geändert werden"
+	p, err := r.resolvePairing(ctx, plan.GroupID.ValueString(), plan.Role.ValueString(), state.ID.ValueString())
+	if err == nil && p.id == "" {
+		err = errors.New("die Rolle existiert nicht mehr")
+	}
+	if err != nil {
+		resp.Diagnostics.AddError(summary, err.Error())
+		return
+	}
+	gp, ok := r.writeGrowPath(ctx, plan, p, summary, &resp.Diagnostics)
+	if !ok {
+		return
+	}
 	plan.setData(pd)
+	plan.GrowPathID = gp
 	plan.ID = state.ID
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
