@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -226,6 +227,9 @@ func (m groupRoleDefinitionModel) writeBody(base client.Row) (client.Row, error)
 		body["growPathId"] = m.GrowPathID.ValueInt64()
 	}
 	if m.ClearGrowPath.ValueBool() {
+		if !m.GrowPathID.IsUnknown() && !m.GrowPathID.IsNull() {
+			return nil, errors.New("grow_path_id und clear_grow_path widersprechen sich")
+		}
 		body["growPathId"] = nil
 	}
 	if !m.GroupTypeID.IsUnknown() && !m.GroupTypeID.IsNull() {

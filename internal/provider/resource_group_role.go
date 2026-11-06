@@ -203,6 +203,10 @@ func (r *groupRoleResource) writeGrowPath(ctx context.Context, m groupRoleModel,
 	want := m.GrowPathID
 	var value any = want.ValueInt64()
 	if m.ClearGrowPath.ValueBool() {
+		if !want.IsNull() && !want.IsUnknown() {
+			diags.AddError(summary, "grow_path_id und clear_grow_path widersprechen sich")
+			return types.Int64Null(), false
+		}
 		want, value = types.Int64Null(), nil
 	} else if want.IsUnknown() || want.IsNull() {
 		return p.growPath, true
@@ -317,6 +321,20 @@ func (r *groupRoleResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 	const summary = "Rollenrechte konnten nicht geändert werden"
+	var configGrowPath types.Int64
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("grow_path_id"), &configGrowPath)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	// grow_path_id left out (and no clear switch): unmanaged. The plan carries the
+	// STATE value (UseStateForUnknown); writing it would revert a UI edit made
+	// since the refresh. No lookup, no request; the next Read picks up the live value.
+	if configGrowPath.IsNull() && !plan.ClearGrowPath.ValueBool() {
+		plan.setData(pd)
+		plan.ID = state.ID
+		resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+		return
+	}
 	p, err := r.resolvePairing(ctx, plan.GroupID.ValueString(), plan.Role.ValueString(), state.ID.ValueString())
 	if err == nil && p.id == "" {
 		err = errors.New("die Rolle existiert nicht mehr")

@@ -156,3 +156,31 @@ resource "churchtools_group_role_definition" "x" {
 		},
 	})
 }
+
+// clear_grow_path known only at apply: grow_path_id is planned unknown, not as
+// the old state value, or the cleared stage would be an inconsistent result.
+func TestAccGroupRole_ClearGrowPathUnknownAtPlan(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedSLL(mock)
+	mock.SeedGroupRoleGrowPath(1748, 16829, intp(4))
+	cfg := `
+resource "terraform_data" "clear" {
+  input = true
+}
+` + roleGrowPathCfg(mock, "clear_grow_path = terraform_data.clear.output")
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: roleGrowPathCfg(mock, ""), Check: livePath(mock, intp(4))},
+			{
+				Config: cfg,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr("churchtools_group_role.mitglied", "grow_path_id"),
+					livePath(mock, nil),
+				),
+			},
+			{Config: cfg, PlanOnly: true},
+		},
+	})
+}

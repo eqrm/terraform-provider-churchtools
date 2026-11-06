@@ -59,6 +59,7 @@ type permState struct {
 	authTableCalls int
 	writes         []string
 	rolePatches    []map[string]any // PATCH bodies on /groups/{id}/roles/{roleId}
+	onGrantWrite   func()           // runs once on the next grant write, under s.mu
 }
 
 func (s *Server) perms() *permState {
@@ -298,6 +299,10 @@ func (s *Server) handlePermissions(w http.ResponseWriter, r *http.Request) bool 
 		return true
 	}
 	ps.writes = append(ps.writes, writeLog(r.Method, *body.AuthID, body.IsInherited, body.DataID))
+	if fn := ps.onGrantWrite; fn != nil {
+		ps.onGrantWrite = nil
+		fn()
+	}
 	auth := *body.AuthID
 
 	if r.Method == http.MethodDelete {
@@ -417,12 +422,16 @@ func (s *Server) patchGroupRole(w http.ResponseWriter, r *http.Request, groupID,
 		if strconv.Itoa(row["id"].(int)) != roleID {
 			continue
 		}
-		ps.rolePatches = append(ps.rolePatches, body)
 		if v, ok := body["growPathId"]; ok {
 			switch n := v.(type) {
 			case nil:
 				row["growPathId"] = nil
 			case float64:
+				if n != float64(int(n)) {
+					w.WriteHeader(http.StatusBadRequest)
+					writeData(w, map[string]any{"message": "growPathId must be an integer or null"})
+					return
+				}
 				row["growPathId"] = int(n)
 			default:
 				w.WriteHeader(http.StatusBadRequest)
@@ -430,6 +439,7 @@ func (s *Server) patchGroupRole(w http.ResponseWriter, r *http.Request, groupID,
 				return
 			}
 		}
+		ps.rolePatches = append(ps.rolePatches, body)
 		writeData(w, row)
 		return
 	}
@@ -442,6 +452,19 @@ func (s *Server) patchGroupRole(w http.ResponseWriter, r *http.Request, groupID,
 func (s *Server) SeedGroupRoleGrowPath(groupID, pairingID int, growPathID *int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.setGroupRoleGrowPath(groupID, pairingID, growPathID)
+}
+
+// SetGroupRoleGrowPathOnNextGrantWrite changes a pairing's growPathId when the
+// next grant row is written: a UI edit landing between refresh and apply.
+func (s *Server) SetGroupRoleGrowPathOnNextGrantWrite(groupID, pairingID int, growPathID *int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.perms().onGrantWrite = func() { s.setGroupRoleGrowPath(groupID, pairingID, growPathID) }
+}
+
+// setGroupRoleGrowPath stores a pairing's growPathId. Caller holds s.mu.
+func (s *Server) setGroupRoleGrowPath(groupID, pairingID int, growPathID *int) {
 	for _, row := range s.perms().groupRoles[strconv.Itoa(groupID)] {
 		if row["id"].(int) == pairingID {
 			if growPathID == nil {

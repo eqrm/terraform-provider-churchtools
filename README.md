@@ -293,8 +293,8 @@ pairing. Example: [`examples/resources/churchtools_group_role`](examples/resourc
   Wachstumspfad stage) is written only when set; left out, the live value is
   passed through. `clear_grow_path = true` says "no stage" and sends `growPathId:
   null`, because Terraform cannot tell an explicit null from a left-out attribute.
-  It excludes `grow_path_id`; dropping it afterwards leaves the role unmanaged. `group_type_id` cannot change: a change is a plan error,
-  not a replacement. Destroy un-manages: the role is dropped from state with a
+  It excludes `grow_path_id`; dropping it afterwards leaves the role unmanaged.
+  `group_type_id` cannot change: a change is a plan error, not a replacement. Destroy un-manages: the role is dropped from state with a
   warning and stays in ChurchTools; delete it by hand in the UI (ct-structure#116).
 - `churchtools_group_type_role` (`/permissions/group_type_role/{roleId}`, import id
   = role id) has the same `grant` block, `applies_to_subgroups`, `preserve_unknown`

@@ -50,9 +50,16 @@ func (m growPathPlanModifier) MarkdownDescription(ctx context.Context) string {
 func (growPathPlanModifier) PlanModifyInt64(ctx context.Context, req planmodifier.Int64Request, resp *planmodifier.Int64Response) {
 	var clear types.Bool
 	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("clear_grow_path"), &clear)...)
-	if clear.ValueBool() {
-		resp.PlanValue = types.Int64Null()
-		return
+	if req.ConfigValue.IsNull() {
+		if clear.IsUnknown() {
+			// Known only at apply: the stage may become null then.
+			resp.PlanValue = types.Int64Unknown()
+			return
+		}
+		if clear.ValueBool() {
+			resp.PlanValue = types.Int64Null()
+			return
+		}
 	}
 	int64planmodifier.UseStateForUnknown().PlanModifyInt64(ctx, req, resp)
 }

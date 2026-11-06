@@ -136,3 +136,42 @@ func TestAccGroupRole_GrowPathManaged(t *testing.T) {
 		},
 	})
 }
+
+// Left out, with a UI edit between refresh and apply: a grant-only update must
+// not PATCH the stale state value back over it.
+func TestAccGroupRole_GrowPathUnmanagedKeepsUIEditDuringApply(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	seedSLL(mock)
+	mock.SeedGroupRoleGrowPath(1748, 16829, intp(4))
+	withExtraGrant := providerBlock(mock.URL) + `
+resource "churchtools_group_role" "mitglied" {
+  group_id = "1748"
+  role     = "Mitglied"
+
+  grant {
+    right       = "churchdb:view alldata"
+    departments = ["2"]
+  }
+  grant {
+    right    = "churchdb:view station"
+    campuses = ["24"]
+  }
+  grant {
+    right = "churchcal:view"
+  }
+}
+`
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: roleGrowPathCfg(mock, ""), Check: livePath(mock, intp(4))},
+			{
+				PreConfig: func() { mock.SetGroupRoleGrowPathOnNextGrantWrite(1748, 16829, intp(5)) },
+				Config:    withExtraGrant,
+				Check:     resource.ComposeAggregateTestCheckFunc(patchBodies(mock), livePath(mock, intp(5))),
+			},
+		},
+	})
+}
