@@ -273,15 +273,10 @@ func (r *groupResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 	haveRow := groupFromRow(id, got)
 	have := haveRow.InformLeader
+	// State holds what CT stored; a visibility CT ignored is reported after inform_leader
+	// is settled, so the error leaves only the field CT refused.
 	wantVis := plan.Visibility
 	plan.Visibility = haveRow.Visibility
-	if visibilityManaged(wantVis) && !wantVis.Equal(haveRow.Visibility) {
-		resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
-		resp.Diagnostics.AddError("ChurchTools hat die Änderung ignoriert",
-			fmt.Sprintf("Die Gruppe %s/%s wurde mit visibility = %s angelegt, steht danach aber auf %s.",
-				groupCollection, id, groupDisplay(wantVis), groupDisplay(haveRow.Visibility)))
-		return
-	}
 	if informLeaderManaged(plan.InformLeader) && !plan.InformLeader.Equal(have) {
 		if _, err := r.client.Update(ctx, groupCollection, id, "PATCH",
 			client.Row{groupInformLeaderKey: plan.InformLeader.ValueBool()}); err != nil {
@@ -311,6 +306,11 @@ func (r *groupResource) Create(ctx context.Context, req resource.CreateRequest, 
 	}
 	plan.InformLeader = have
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+	if visibilityManaged(wantVis) && !wantVis.Equal(plan.Visibility) {
+		resp.Diagnostics.AddError("ChurchTools hat die Änderung ignoriert",
+			fmt.Sprintf("Die Gruppe %s/%s wurde mit visibility = %s angelegt, steht danach aber auf %s.",
+				groupCollection, id, groupDisplay(wantVis), groupDisplay(plan.Visibility)))
+	}
 }
 
 // groupFromRow maps a GET /groups/{id} row onto the model.

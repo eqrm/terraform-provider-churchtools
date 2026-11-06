@@ -47,6 +47,9 @@ type Server struct {
 	// job (19): the "Aktiv" checkbox is locked in its own UI, and the PUT reply
 	// already carries the old value (eqrm-dev, 2026-10-02).
 	ignoreOnPut map[string]map[string]bool
+	// ignoreOnPost lists, per collection, keys a POST answers 200 to but does not
+	// store, the way live CT treats informLeader on a group create.
+	ignoreOnPost map[string]map[string]bool
 	// perm holds the permission routes' state (permissions.go).
 	perm *permState
 	// roleMembers makes DELETE /group/roles/{id} answer 409 (roles.go).
@@ -133,7 +136,7 @@ func (s *Server) RateLimitWhoami(n int, retryAfter string) {
 }
 
 func New() *Server {
-	s := &Server{rows: map[string]map[string]any{}, nextID: 1000, dropCreateID: map[string]bool{}, legacyRows: map[string]map[string]any{}, lastPut: map[string]map[string]any{}, lastPatch: map[string]map[string]any{}, lastPost: map[string]map[string]any{}, ignoreOnPut: map[string]map[string]bool{}}
+	s := &Server{rows: map[string]map[string]any{}, nextID: 1000, dropCreateID: map[string]bool{}, legacyRows: map[string]map[string]any{}, lastPut: map[string]map[string]any{}, lastPatch: map[string]map[string]any{}, lastPost: map[string]map[string]any{}, ignoreOnPut: map[string]map[string]bool{}, ignoreOnPost: map[string]map[string]bool{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
 	return s
 }
@@ -289,6 +292,18 @@ func (s *Server) IgnoreOnPut(collection string, id int, keys ...string) {
 // top-level request key (e.g. "campusId"), not the stored information.* name.
 func (s *Server) IgnoreOnPatch(collection string, id int, keys ...string) {
 	s.IgnoreOnPut(collection, id, keys...)
+}
+
+// IgnoreOnPost makes a POST to collection accept these keys without storing them.
+func (s *Server) IgnoreOnPost(collection string, keys ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ignoreOnPost[collection] == nil {
+		s.ignoreOnPost[collection] = map[string]bool{}
+	}
+	for _, key := range keys {
+		s.ignoreOnPost[collection][key] = true
+	}
 }
 
 // LastPost returns the body of the most recent POST to a collection (nil if none).
@@ -647,6 +662,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.lastPost[collection] = map[string]any{}
 		for k, v := range body {
 			s.lastPost[collection][k] = v
+		}
+		for k := range s.ignoreOnPost[collection] {
+			delete(body, k)
 		}
 		if collection == "/groups" {
 			if missing := groupMissing(body); missing != "" {

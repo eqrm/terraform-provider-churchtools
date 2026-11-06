@@ -188,6 +188,9 @@ with members in the group, and whether CT keeps a group's per-role grants
 POST takes it; PATCH moves it (200, read back, `isHidden`/`isPublic` follow). CT does not
 validate the value (PATCH `bogus` answered 200 and was stored), so the schema does. Unset
 in config, it is not managed. Type rights (permission 1108) do not apply to hidden groups.
+The provider path ran live on eqrm-dev on 2026-11-06 (group 2083, destroyed afterwards):
+create with `intern`, a clean re-plan, update to `public` (CT read back `public`), no diff
+once the attribute was dropped from config, destroy.
 
 `inform_leader` on `churchtools_group` reads from `settings.informLeader` and writes a
 flat top-level `informLeader`. The OpenAPI spec documents no write body for it, so the
