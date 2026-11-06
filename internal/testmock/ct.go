@@ -47,6 +47,9 @@ type Server struct {
 	// job (19): the "Aktiv" checkbox is locked in its own UI, and the PUT reply
 	// already carries the old value (eqrm-dev, 2026-10-02).
 	ignoreOnPut map[string]map[string]bool
+	// ignoreOnPost lists, per collection, keys a POST answers 200 to but does not
+	// store, the way live CT treats informLeader on a group create.
+	ignoreOnPost map[string]map[string]bool
 	// perm holds the permission routes' state (permissions.go).
 	perm *permState
 	// roleMembers makes DELETE /group/roles/{id} answer 409 (roles.go).
@@ -133,7 +136,7 @@ func (s *Server) RateLimitWhoami(n int, retryAfter string) {
 }
 
 func New() *Server {
-	s := &Server{rows: map[string]map[string]any{}, nextID: 1000, dropCreateID: map[string]bool{}, legacyRows: map[string]map[string]any{}, lastPut: map[string]map[string]any{}, lastPatch: map[string]map[string]any{}, lastPost: map[string]map[string]any{}, ignoreOnPut: map[string]map[string]bool{}}
+	s := &Server{rows: map[string]map[string]any{}, nextID: 1000, dropCreateID: map[string]bool{}, legacyRows: map[string]map[string]any{}, lastPut: map[string]map[string]any{}, lastPatch: map[string]map[string]any{}, lastPost: map[string]map[string]any{}, ignoreOnPut: map[string]map[string]bool{}, ignoreOnPost: map[string]map[string]bool{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.handle))
 	return s
 }
@@ -289,6 +292,18 @@ func (s *Server) IgnoreOnPut(collection string, id int, keys ...string) {
 // top-level request key (e.g. "campusId"), not the stored information.* name.
 func (s *Server) IgnoreOnPatch(collection string, id int, keys ...string) {
 	s.IgnoreOnPut(collection, id, keys...)
+}
+
+// IgnoreOnPost makes a POST to collection accept these keys without storing them.
+func (s *Server) IgnoreOnPost(collection string, keys ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ignoreOnPost[collection] == nil {
+		s.ignoreOnPost[collection] = map[string]bool{}
+	}
+	for _, key := range keys {
+		s.ignoreOnPost[collection][key] = true
+	}
 }
 
 // LastPost returns the body of the most recent POST to a collection (nil if none).
@@ -648,6 +663,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		for k, v := range body {
 			s.lastPost[collection][k] = v
 		}
+		for k := range s.ignoreOnPost[collection] {
+			delete(body, k)
+		}
 		if collection == "/groups" {
 			if missing := groupMissing(body); missing != "" {
 				w.WriteHeader(http.StatusBadRequest)
@@ -753,10 +771,16 @@ func groupRow(body map[string]any, informLeader bool) map[string]any {
 	}
 	// settings.informLeader is always served. POST ignores the flat key, as live
 	// CT does (eqrm-dev, 2026-10-26); only PATCH writes it.
+	// settings.visibility defaults to "restricted" and, unlike informLeader, POST takes
+	// it (eqrm-dev, 2026-11-06). Live CT stores any string without validating it.
+	visibility := "restricted"
+	if v, ok := body["visibility"].(string); ok {
+		visibility = v
+	}
 	return map[string]any{
 		"name":        body["name"],
 		"information": info,
-		"settings":    map[string]any{"informLeader": informLeader},
+		"settings":    map[string]any{"informLeader": informLeader, "visibility": visibility},
 	}
 }
 
@@ -776,7 +800,7 @@ func applyGroupPatch(row, body map[string]any, ignored map[string]bool) {
 			row[k] = v
 			continue
 		}
-		if k == "informLeader" {
+		if k == "informLeader" || k == "visibility" {
 			settings, _ := row["settings"].(map[string]any)
 			if settings == nil {
 				settings = map[string]any{}

@@ -599,3 +599,154 @@ resource "churchtools_group" "g" {
 		},
 	})
 }
+
+// visibility is Optional + Computed. Unset: never sent, no diff, CT's value (a new
+// group is "restricted") is read into state. Set on create: sent in the POST body.
+// Changed: PATCH carries only it. Drift is detected when set, ignored when unset.
+// Invalid values are refused at plan time; import reads the value.
+func TestAccGroup_Visibility(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	const addr = "churchtools_group.g"
+	cfg := func(line string) string { return groupConfig(mock.URL, "Gruppe VIS", line) }
+	held := func(want string) resource.TestCheckFunc {
+		return func(*terraform.State) error {
+			row := mock.Find("/groups", "name", "Gruppe VIS")
+			if row == nil {
+				t.Fatal("group not in mock")
+			}
+			if got := row["settings"].(map[string]any)["visibility"]; got != want {
+				t.Errorf("CT holds visibility = %v, want %v", got, want)
+			}
+			return nil
+		}
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{Config: cfg(`  visibility = "bogus"`), ExpectError: regexp.MustCompile(`(?s)Ungültiger Wert.*hidden, intern, restricted, public`)},
+			{
+				Config: cfg(``),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "visibility", "restricted"),
+					func(*terraform.State) error {
+						if _, has := mock.LastPost("/groups")["visibility"]; has {
+							t.Error("unset visibility was sent on create")
+						}
+						return nil
+					},
+				),
+			},
+			{Config: cfg(``), PlanOnly: true},
+			{
+				PreConfig: func() { mock.ClearLastPatch("/groups") },
+				Config:    cfg(`  visibility = "intern"`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "visibility", "intern"), held("intern"),
+					func(*terraform.State) error {
+						if got := mock.LastPatch("/groups"); !reflect.DeepEqual(got, map[string]any{"visibility": "intern"}) {
+							t.Errorf("PATCH body = %v, want only visibility: intern", got)
+						}
+						return nil
+					},
+				),
+			},
+			{Config: cfg(`  visibility = "intern"`), PlanOnly: true},
+			{
+				// Unset again: the provider lets go, the value stays and nothing is sent.
+				PreConfig: func() { mock.ClearLastPatch("/groups") },
+				Config:    cfg(``),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(addr, "visibility", "intern"), held("intern"),
+					func(*terraform.State) error {
+						if got := mock.LastPatch("/groups"); got != nil {
+							t.Errorf("PATCH %v sent for an unset visibility", got)
+						}
+						return nil
+					},
+				),
+			},
+			{
+				// Drift while set: someone hides the group in the UI. Detected, then put back.
+				PreConfig: func() {
+					mock.Find("/groups", "name", "Gruppe VIS")["settings"].(map[string]any)["visibility"] = "hidden"
+				},
+				Config:             cfg(`  visibility = "intern"`),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+			},
+			{Config: cfg(`  visibility = "intern"`), Check: held("intern")},
+			{ResourceName: addr, ImportState: true, ImportStateVerify: true},
+			{
+				// Drift while unset: read into state, no diff.
+				PreConfig: func() {
+					mock.Find("/groups", "name", "Gruppe VIS")["settings"].(map[string]any)["visibility"] = "public"
+				},
+				Config:   cfg(``),
+				PlanOnly: true,
+			},
+		},
+	})
+}
+
+// Set on create: the POST carries it (live CT takes it there, unlike informLeader),
+// and no PATCH follows.
+func TestAccGroup_VisibilityOnCreate(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{
+			{
+				Config: groupConfig(mock.URL, "Gruppe VIS2", `  visibility = "hidden"`),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("churchtools_group.g", "visibility", "hidden"),
+					func(*terraform.State) error {
+						if got := mock.LastPost("/groups")["visibility"]; got != "hidden" {
+							t.Errorf("POST visibility = %v, want hidden", got)
+						}
+						if got := mock.LastPatch("/groups"); got != nil {
+							t.Errorf("unexpected PATCH %v", got)
+						}
+						return nil
+					},
+				),
+			},
+			{Config: groupConfig(mock.URL, "Gruppe VIS2", `  visibility = "hidden"`), PlanOnly: true},
+		},
+	})
+}
+
+// CT ignoring visibility on the POST fails the apply with the real error, not a
+// complaint about an unknown inform_leader left in state.
+func TestAccGroup_VisibilityOnCreateIgnoredFails(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	mock.IgnoreOnPost("/groups", "visibility")
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{{
+			Config:      groupConfig(mock.URL, "Gruppe V9", `  visibility = "hidden"`),
+			ExpectError: regexp.MustCompile(`(?s)ChurchTools hat die.*ignoriert`),
+		}},
+	})
+}
+
+// CT ignoring visibility on create still applies a managed inform_leader first,
+// so the error leaves only the one field CT refused.
+func TestAccGroup_VisibilityIgnoredStillSetsInformLeader(t *testing.T) {
+	mock := testmock.New()
+	defer mock.Close()
+	mock.IgnoreOnPost("/groups", "visibility")
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: protoV6(),
+		Steps: []resource.TestStep{{
+			Config:      groupConfig(mock.URL, "Gruppe V10", "  visibility = \"hidden\"\n  inform_leader = true"),
+			ExpectError: regexp.MustCompile(`(?s)ChurchTools hat die.*ignoriert`),
+		}},
+	})
+	if got := mock.LastPatch("/groups"); got["informLeader"] != true {
+		t.Fatalf("inform_leader was not PATCHed after the visibility error: %v", got)
+	}
+}
