@@ -226,6 +226,13 @@ verwalten" at a group). It creates nothing: CT pairs every role of the group typ
 with the group when the group is created, and the resource writes onto that
 pairing. Example: [`examples/resources/churchtools_group_role`](examples/resources/churchtools_group_role/resource.tf).
 
+- **`grow_path_id` / `clear_grow_path`** set the Wachstumspfad stage of this role in
+  this group only (the type-level default is on `group_role_definition`); CT
+  stores it on the same `/groups/{id}/roles` row and the resource writes it with
+  `PATCH /groups/{id}/roles/{roleId}`, sending only `growPathId`. Left out: unmanaged
+  (the live value is kept, no diff). `clear_grow_path = true` sends `growPathId:
+  null` and keeps the role at "no stage"; it excludes `grow_path_id`. Both are read
+  back after the write. The PATCH (partial body, null) is mock-tested only.
 - **One `grant` block per right**, with the ids in the argument for the right's
   scope dimension (`groups`, `campuses`, `departments`, `security_levels`,
   `group_types`, `comment_viewers`; every other dimension in `data_ids`). A block
@@ -282,9 +289,12 @@ pairing. Example: [`examples/resources/churchtools_group_role`](examples/resourc
 - `churchtools_group_role_definition` (`/group/roles`, import id = role id) manages
   `name`, `type`, `shorty`, `sort_key`, `is_default` and `is_hidden`. CT's PUT is
   not partial and `nameTranslated` is read-only, so an update reads the live row,
-  overlays the planned values and sends the full object; `growPathId` is passed
-  through, never written. `group_type_id` cannot change: a change is a plan error,
-  not a replacement. Destroy un-manages: the role is dropped from state with a
+  overlays the planned values and sends the full object. `grow_path_id` (the
+  Wachstumspfad stage) is written only when set; left out, the live value is
+  passed through. `clear_grow_path = true` says "no stage" and sends `growPathId:
+  null`, because Terraform cannot tell an explicit null from a left-out attribute.
+  It excludes `grow_path_id`; dropping it afterwards leaves the role unmanaged.
+  `group_type_id` cannot change: a change is a plan error, not a replacement. Destroy un-manages: the role is dropped from state with a
   warning and stays in ChurchTools; delete it by hand in the UI (ct-structure#116).
 - `churchtools_group_type_role` (`/permissions/group_type_role/{roleId}`, import id
   = role id) has the same `grant` block, `applies_to_subgroups`, `preserve_unknown`
@@ -329,8 +339,9 @@ OpenAPI spec. **Mock-tested only**: the resource itself (create, update, import,
 DELETE), and `grow_path_id` sent on POST/PUT, read back, and carried through when the config
 leaves it out. The mock's DELETE/409 behaviour is pinned in a test but the provider never calls
 it. Not measured: the status code of a successful PUT (the mock answers 204; the provider does
-not parse it), and the provider has not yet run against dev. `grow_path_id` cannot be set to
-null: it is Optional+Computed, so removing it from the config keeps the live value. A change
+not parse it), and the provider has not yet run against dev. `grow_path_id` is Optional+Computed, so removing it from the config keeps the live value;
+clearing is `clear_grow_path = true` (PUT/PATCH with `growPathId: null`; the OpenAPI types it
+`integer|null`, the null write is mock-tested only). A change
 to a stage does not recalculate the growPathIds already stored on persons.
 
 Still **not verified live**:
