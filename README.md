@@ -429,8 +429,13 @@ grant row, so an unpaced apply bursts hundreds of calls (eqrm/ct-structure run
   context cancellation. A 429 also pauses *every* request of the client for that
   wait, so parallel resources do not each retry into the wall. After the last
   retry the error says so. A 429 is retried for every method, creates included,
-  because ChurchTools rejects the request before processing it. 5xx and network
-  errors are never retried: a write may already have been applied.
+  because ChurchTools rejects the request before processing it.
+- **Retries database deadlocks.** A 500 whose body carries `SQLSTATE[40001]`,
+  `Deadlock found` or a lock wait timeout (1205) is resent up to 4 times, waiting
+  250ms doubling plus jitter, for every method. MySQL rolls the whole transaction
+  back, so nothing was applied. It does not pause other requests; after the last
+  retry the 500 is returned as usual. Any other 5xx and network errors are never
+  retried: a write may already have been applied.
 
 ```hcl
 provider "churchtools" {

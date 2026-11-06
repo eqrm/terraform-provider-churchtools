@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,7 +38,26 @@ const (
 	rateLimitBackoff   = 500 * time.Millisecond
 	rateLimitMaxWait   = 60 * time.Second
 	rateLimitJitterMax = 250 * time.Millisecond
+
+	// deadlockRetries is how often a request is resent after ChurchTools
+	// answered a database deadlock; the waits are 250ms, 500ms, 1s, 2s plus jitter.
+	deadlockRetries   = 4
+	deadlockBackoff   = 250 * time.Millisecond
+	deadlockJitterMax = 250 * time.Millisecond
 )
+
+// isDBConflict reports whether a 500 body is MySQL telling ChurchTools to
+// restart the transaction: a deadlock or serialization failure (SQLSTATE 40001,
+// error 1213) or a lock wait timeout (error 1205). MySQL rolls the whole
+// transaction back, so the request left nothing behind.
+func isDBConflict(status int, body []byte) bool {
+	if status != http.StatusInternalServerError {
+		return false
+	}
+	b := string(body)
+	return strings.Contains(b, "SQLSTATE[40001]") || strings.Contains(b, "Deadlock found") ||
+		strings.Contains(b, "SQLSTATE[HY000]: General error: 1205")
+}
 
 // pacer spaces request starts and shares a 429 pause. A nil pointer does not
 // pace.
@@ -135,13 +155,17 @@ var ErrRateLimited = errors.New("churchtools: rate limited (HTTP 429)")
 //
 // A 429 is safe to retry for every method, POSTs included: ChurchTools rejects
 // it at the throttle before the request is processed (ct-cli relies on the same
-// property), so nothing was applied. Only 429 is retried here; 5xx and
-// transport errors may have been applied and are never repeated.
+// property), so nothing was applied. The one 5xx that is retried is a database
+// deadlock (see isDBConflict): the transaction was rolled back, so resending is
+// safe for every method. That is a per-request conflict, not a rate limit, so it
+// does not pause the pacer. Other 5xx and transport errors may have been applied
+// and are never repeated.
 func (c *Client) send(ctx context.Context, build func() (*http.Request, error)) (int, []byte, error) {
 	base := c.retryBase
 	if base <= 0 {
 		base = rateLimitBackoff
 	}
+	conflicts := 0
 	for attempt := 0; ; attempt++ {
 		if err := c.pace.wait(ctx); err != nil {
 			return 0, nil, err
@@ -156,6 +180,19 @@ func (c *Client) send(ctx context.Context, build func() (*http.Request, error)) 
 		}
 		raw, rerr := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if rerr == nil && conflicts < deadlockRetries && isDBConflict(resp.StatusCode, raw) {
+			d := (deadlockBackoff << conflicts) + time.Duration(rand.Int64N(int64(deadlockJitterMax)))
+			conflicts++
+			attempt-- // a conflict does not use up the 429 budget
+			t := time.NewTimer(d)
+			select {
+			case <-t.C:
+			case <-ctx.Done():
+				t.Stop()
+				return 0, nil, ctx.Err()
+			}
+			continue
+		}
 		if resp.StatusCode != http.StatusTooManyRequests {
 			return resp.StatusCode, raw, rerr
 		}

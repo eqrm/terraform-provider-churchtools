@@ -85,7 +85,12 @@ type Server struct {
 	whoami429  int
 	retryAfter string
 	// whoamiFail is how many /whoami calls still answer whoamiFailStatus.
-	whoamiFail       int
+	whoamiFail int
+	// failLeft requests still answer failStatus/failBody (see FailNext).
+	failLeft         int
+	failStatus       int
+	failBody         string
+	requests         int
 	whoamiFailStatus int
 }
 
@@ -133,6 +138,21 @@ func (s *Server) RateLimitWhoami(n int, retryAfter string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.whoami429, s.retryAfter = n, retryAfter
+}
+
+// FailNext makes the next n non-whoami requests answer status with body, then
+// behave normally.
+func (s *Server) FailNext(n, status int, body string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failLeft, s.failStatus, s.failBody = n, status, body
+}
+
+// Requests is how many non-whoami requests the mock has seen.
+func (s *Server) Requests() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.requests
 }
 
 func New() *Server {
@@ -498,6 +518,16 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		if r.URL.Query().Get("login_token") != "" {
 			s.logins++ // only an accepted login is logged by CT
+		}
+	}
+	if r.URL.Path != "/api/whoami" && r.URL.Path != "/api/csrftoken" {
+		s.requests++
+		if s.failLeft > 0 {
+			s.failLeft--
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(s.failStatus)
+			w.Write([]byte(s.failBody))
+			return
 		}
 	}
 	if s.strictSessions && r.URL.Path != "/api/whoami" && r.URL.Path != "/api/csrftoken" {
