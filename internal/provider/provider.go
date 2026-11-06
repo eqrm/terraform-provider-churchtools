@@ -115,7 +115,8 @@ func (p *churchtoolsProvider) Schema(_ context.Context, _ provider.SchemaRequest
 					"is retried up to 6 times, honouring Retry-After (each wait capped at 60s) with " +
 					"exponential backoff, and pauses all requests while it lasts. A 500 caused by a " +
 					"database deadlock (SQLSTATE 40001, \"Deadlock found\", lock wait timeout) is " +
-					"resent up to 4 times with 250ms doubling backoff, without pausing other requests.",
+					"resent up to 4 times with 250ms doubling backoff for GET, PUT, PATCH and DELETE " +
+					"(not POST, which may have been partly applied), without pausing other requests.",
 			},
 		},
 	}

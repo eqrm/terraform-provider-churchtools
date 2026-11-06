@@ -73,3 +73,17 @@ func TestDeadlock_CancelDuringBackoff(t *testing.T) {
 		t.Error("cancellation was not prompt")
 	}
 }
+
+func TestDeadlock_PostNotRetried(t *testing.T) {
+	ct := testmock.New()
+	defer ct.Close()
+	ct.FailNext(1, http.StatusInternalServerError, deadlockBody)
+	_, err := deadlockClient(ct.URL).Create(context.Background(), "/campuses", Row{"name": "x"})
+	var se *StatusError
+	if !errors.As(err, &se) || se.Status != 500 {
+		t.Fatalf("err = %v, want a 500 StatusError", err)
+	}
+	if got := ct.Requests(); got != 1 {
+		t.Errorf("requests = %d, want 1 (a POST may have been partly applied)", got)
+	}
+}

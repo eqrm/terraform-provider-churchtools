@@ -48,8 +48,9 @@ const (
 
 // isDBConflict reports whether a 500 body is MySQL telling ChurchTools to
 // restart the transaction: a deadlock or serialization failure (SQLSTATE 40001,
-// error 1213) or a lock wait timeout (error 1205). MySQL rolls the whole
-// transaction back, so the request left nothing behind.
+// error 1213) or a lock wait timeout (error 1205). Whether earlier statements
+// of the same request were committed depends on ChurchTools' transaction scope,
+// which is not documented, so only idempotent methods are resent (see send).
 func isDBConflict(status int, body []byte) bool {
 	if status != http.StatusInternalServerError {
 		return false
@@ -156,10 +157,12 @@ var ErrRateLimited = errors.New("churchtools: rate limited (HTTP 429)")
 // A 429 is safe to retry for every method, POSTs included: ChurchTools rejects
 // it at the throttle before the request is processed (ct-cli relies on the same
 // property), so nothing was applied. The one 5xx that is retried is a database
-// deadlock (see isDBConflict): the transaction was rolled back, so resending is
-// safe for every method. That is a per-request conflict, not a rate limit, so it
-// does not pause the pacer. Other 5xx and transport errors may have been applied
-// and are never repeated.
+// deadlock (see isDBConflict), and only for GET, PUT, PATCH and DELETE: those
+// are idempotent, so a resend is safe even if part of the request was committed
+// before the deadlock. A POST (a create, or any legacy AjaxJSON call) is not
+// resent, since a partly applied create would be duplicated. A deadlock is a
+// per-request conflict, not a rate limit, so it does not pause the pacer. Other
+// 5xx and transport errors may have been applied and are never repeated.
 func (c *Client) send(ctx context.Context, build func() (*http.Request, error)) (int, []byte, error) {
 	base := c.retryBase
 	if base <= 0 {
@@ -180,7 +183,8 @@ func (c *Client) send(ctx context.Context, build func() (*http.Request, error)) 
 		}
 		raw, rerr := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if rerr == nil && conflicts < deadlockRetries && isDBConflict(resp.StatusCode, raw) {
+		if rerr == nil && req.Method != http.MethodPost && conflicts < deadlockRetries &&
+			isDBConflict(resp.StatusCode, raw) {
 			d := (deadlockBackoff << conflicts) + time.Duration(rand.Int64N(int64(deadlockJitterMax)))
 			conflicts++
 			attempt-- // a conflict does not use up the 429 budget

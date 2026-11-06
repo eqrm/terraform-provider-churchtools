@@ -432,9 +432,11 @@ grant row, so an unpaced apply bursts hundreds of calls (eqrm/ct-structure run
   because ChurchTools rejects the request before processing it.
 - **Retries database deadlocks.** A 500 whose body carries `SQLSTATE[40001]`,
   `Deadlock found` or a lock wait timeout (1205) is resent up to 4 times, waiting
-  250ms doubling plus jitter, for every method. MySQL rolls the whole transaction
-  back, so nothing was applied. It does not pause other requests; after the last
-  retry the 500 is returned as usual. Any other 5xx and network errors are never
+  250ms doubling plus jitter, for GET, PUT, PATCH and DELETE. Those are
+  idempotent, so a resend is safe even if ChurchTools committed part of the
+  request before the deadlock. A POST (creates, legacy AjaxJSON calls) is not
+  resent: a partly applied create would be duplicated. It does not pause other
+  requests; after the last retry the 500 is returned as usual. Any other 5xx and network errors are never
   retried: a write may already have been applied.
 
 ```hcl
