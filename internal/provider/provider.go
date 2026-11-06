@@ -113,7 +113,10 @@ func (p *churchtoolsProvider) Schema(_ context.Context, _ provider.SchemaRequest
 					"0 switches the spacing off. Can also be set with the " + MaxRequestsPerSecondEnv +
 					" environment variable; the attribute wins. Independently of this, an HTTP 429 " +
 					"is retried up to 6 times, honouring Retry-After (each wait capped at 60s) with " +
-					"exponential backoff, and pauses all requests while it lasts.",
+					"exponential backoff, and pauses all requests while it lasts. A 500 caused by a " +
+					"database deadlock (SQLSTATE 40001, \"Deadlock found\", lock wait timeout) is " +
+					"resent up to 4 times with 250ms doubling backoff for GET, PUT, PATCH and DELETE " +
+					"(not POST, which may have been partly applied), without pausing other requests.",
 			},
 		},
 	}
