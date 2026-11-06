@@ -753,10 +753,16 @@ func groupRow(body map[string]any, informLeader bool) map[string]any {
 	}
 	// settings.informLeader is always served. POST ignores the flat key, as live
 	// CT does (eqrm-dev, 2026-10-26); only PATCH writes it.
+	// settings.visibility defaults to "restricted" and, unlike informLeader, POST takes
+	// it (eqrm-dev, 2026-11-06). Live CT stores any string without validating it.
+	visibility := "restricted"
+	if v, ok := body["visibility"].(string); ok {
+		visibility = v
+	}
 	return map[string]any{
 		"name":        body["name"],
 		"information": info,
-		"settings":    map[string]any{"informLeader": informLeader},
+		"settings":    map[string]any{"informLeader": informLeader, "visibility": visibility},
 	}
 }
 
@@ -776,7 +782,7 @@ func applyGroupPatch(row, body map[string]any, ignored map[string]bool) {
 			row[k] = v
 			continue
 		}
-		if k == "informLeader" {
+		if k == "informLeader" || k == "visibility" {
 			settings, _ := row["settings"].(map[string]any)
 			if settings == nil {
 				settings = map[string]any{}

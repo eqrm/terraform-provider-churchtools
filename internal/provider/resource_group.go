@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/eqrm/terraform-provider-churchtools/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -14,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -46,6 +48,15 @@ const groupCollection = "/groups"
 // 2026-10-26), so Create sets it with a PATCH after the POST. Every write is read
 // back, so a key CT ignores is a loud error, not silent drift.
 //
+// visibility ("Sichtbarkeit") is Optional + Computed like inform_leader: left out, the
+// provider does not manage it (no diff, never sent, CT's value is read into state);
+// set, it is enforced and drift-detected. Read: `settings.visibility`. Write: a flat
+// top-level `visibility`, which BOTH POST and PATCH take (measured on eqrm-dev,
+// 2026-11-06: a create with "intern" stood on intern; a PATCH answered 200 and moved it).
+// Values: hidden, intern, restricted, public; a new group defaults to restricted. CT
+// does NOT validate the value (a PATCH with "bogus" answered 200 and stored it), so the
+// schema does. `hidden` matters: type rights (permission 1108) do not apply to hidden groups.
+//
 // Read shape, probed read-only on eqrm-dev on 2026-10-16: the row nests the three
 // ids under `information`, and campusId is always there, JSON null or an int.
 // Writes take them FLAT at the top level. POST and PATCH ran live on eqrm-dev
@@ -62,6 +73,35 @@ type groupModel struct {
 	GroupStatusID types.String `tfsdk:"group_status_id"`
 	CampusID      types.String `tfsdk:"campus_id"`
 	InformLeader  types.Bool   `tfsdk:"inform_leader"`
+	Visibility    types.String `tfsdk:"visibility"`
+}
+
+// groupVisibilities are the values ChurchTools knows for a group's visibility.
+var groupVisibilities = []string{"hidden", "intern", "restricted", "public"}
+
+// groupVisibilityKey is the request key of visibility; the row serves it as `settings.visibility`.
+const groupVisibilityKey = "visibility"
+
+// visibilityManaged reports whether visibility is set in config (see informLeaderManaged).
+func visibilityManaged(v types.String) bool { return !v.IsNull() && !v.IsUnknown() }
+
+type oneOfString []string
+
+func (v oneOfString) Description(context.Context) string {
+	return "value must be one of: " + strings.Join(v, ", ")
+}
+func (v oneOfString) MarkdownDescription(ctx context.Context) string { return v.Description(ctx) }
+func (v oneOfString) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	for _, ok := range v {
+		if req.ConfigValue.ValueString() == ok {
+			return
+		}
+	}
+	resp.Diagnostics.AddAttributeError(req.Path, "Ungültiger Wert",
+		fmt.Sprintf("%q ist nicht erlaubt. Erlaubt: %s.", req.ConfigValue.ValueString(), strings.Join(v, ", ")))
 }
 
 func NewGroupResource() resource.Resource { return &groupResource{} }
@@ -109,6 +149,16 @@ func (r *groupResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 					"not manage it: no diff, nothing sent, the value ChurchTools holds is read into state. " +
 					"Set, it is enforced and drift is reported.",
 				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
+			},
+			"visibility": schema.StringAttribute{
+				Optional: true,
+				Computed: true,
+				Description: "Sichtbarkeit der Gruppe: one of hidden, intern, restricted, public. Note that " +
+					"type rights (permission 1108) do not apply to hidden groups. Left out, the provider " +
+					"does not manage it: no diff, nothing sent, the value ChurchTools holds (restricted for " +
+					"a new group) is read into state. Set, it is enforced and drift is reported.",
+				Validators:    []validator.String{oneOfString(groupVisibilities)},
+				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
 		},
 	}
@@ -179,6 +229,9 @@ func (r *groupResource) Create(ctx context.Context, req resource.CreateRequest, 
 		}
 		body[f.key] = v // campusId stays an explicit null when unset
 	}
+	if visibilityManaged(plan.Visibility) {
+		body[groupVisibilityKey] = plan.Visibility.ValueString() // POST takes it (eqrm-dev, 2026-11-06)
+	}
 
 	row, err := r.client.Create(ctx, groupCollection, body)
 	if err != nil {
@@ -205,6 +258,9 @@ func (r *groupResource) Create(ctx context.Context, req resource.CreateRequest, 
 	if gerr != nil {
 		want := plan.InformLeader
 		plan.InformLeader = types.BoolNull()
+		if plan.Visibility.IsUnknown() {
+			plan.Visibility = types.StringNull()
+		}
 		resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 		if want.IsUnknown() {
 			// Only the computed value is missing; the next refresh fills it. An error
@@ -215,7 +271,17 @@ func (r *groupResource) Create(ctx context.Context, req resource.CreateRequest, 
 		}
 		return
 	}
-	have := groupFromRow(id, got).InformLeader
+	haveRow := groupFromRow(id, got)
+	have := haveRow.InformLeader
+	wantVis := plan.Visibility
+	plan.Visibility = haveRow.Visibility
+	if visibilityManaged(wantVis) && !wantVis.Equal(haveRow.Visibility) {
+		resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+		resp.Diagnostics.AddError("ChurchTools hat die Änderung ignoriert",
+			fmt.Sprintf("Die Gruppe %s/%s wurde mit visibility = %s angelegt, steht danach aber auf %s.",
+				groupCollection, id, groupDisplay(wantVis), groupDisplay(haveRow.Visibility)))
+		return
+	}
 	if informLeaderManaged(plan.InformLeader) && !plan.InformLeader.Equal(have) {
 		if _, err := r.client.Update(ctx, groupCollection, id, "PATCH",
 			client.Row{groupInformLeaderKey: plan.InformLeader.ValueBool()}); err != nil {
@@ -256,6 +322,7 @@ func groupFromRow(id string, row client.Row) groupModel {
 		GroupStatusID: nestedIDString(row, "information", "groupStatusId"),
 		CampusID:      nestedIDString(row, "information", "campusId"),
 		InformLeader:  nestedBool(row, "settings", groupInformLeaderKey),
+		Visibility:    nestedString(row, "settings", groupVisibilityKey),
 	}
 }
 
@@ -298,6 +365,11 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	var cfgVisibility types.String
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("visibility"), &cfgVisibility)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	id := state.ID.ValueString()
 
 	// PATCH only what changed: it leaves everything else on the group (and
@@ -322,6 +394,9 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	}
 	if informLeaderManaged(cfgInformLeader) && !plan.InformLeader.Equal(state.InformLeader) {
 		body[groupInformLeaderKey] = plan.InformLeader.ValueBool()
+	}
+	if visibilityManaged(cfgVisibility) && !plan.Visibility.Equal(state.Visibility) {
+		body[groupVisibilityKey] = plan.Visibility.ValueString()
 	}
 	// The migration goes first and is fully planned (roles, members, mapping) before
 	// any write, so a refusal leaves the group untouched.
@@ -383,6 +458,14 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 				"aber auf %s. Prüfe in ChurchTools, ob dieses Feld für die Gruppe gesperrt ist, und passe die "+
 				"Konfiguration an den Wert an, der dort gilt.",
 				groupCollection, id, plan.InformLeader.ValueBool(), got.InformLeader))
+	}
+	if visibilityManaged(cfgVisibility) && !plan.Visibility.Equal(got.Visibility) {
+		resp.Diagnostics.AddError(
+			"ChurchTools hat die Änderung ignoriert",
+			fmt.Sprintf("Die Änderung an %s/%s mit visibility = %s wurde angenommen, die Gruppe steht danach "+
+				"aber auf %s. Prüfe in ChurchTools, ob dieses Feld für die Gruppe gesperrt ist, und passe die "+
+				"Konfiguration an den Wert an, der dort gilt.",
+				groupCollection, id, groupDisplay(plan.Visibility), groupDisplay(got.Visibility)))
 	}
 	if resp.Diagnostics.HasError() {
 		if typeChanged {

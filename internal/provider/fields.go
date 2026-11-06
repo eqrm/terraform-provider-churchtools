@@ -80,3 +80,13 @@ func nestedBool(row map[string]any, parent, key string) types.Bool {
 	}
 	return types.BoolNull()
 }
+
+// nestedString reads row[parent][key] as a string; absent or not a string is
+// types.StringNull().
+func nestedString(row map[string]any, parent, key string) types.String {
+	obj, _ := row[parent].(map[string]any)
+	if s, ok := obj[key].(string); ok {
+		return types.StringValue(s)
+	}
+	return types.StringNull()
+}
