@@ -87,6 +87,10 @@ type Client struct {
 	// error is retried by the next caller instead of being remembered.
 	offeredMu sync.Mutex
 	offered   map[int64]bool
+
+	// See GroupPermissionDepth.
+	depthMu sync.Mutex
+	depths  map[string]string
 }
 
 // BaseURL is the host this client talks to, for messages.

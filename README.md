@@ -192,6 +192,23 @@ The provider path ran live on eqrm-dev on 2026-11-06 (group 2083, destroyed afte
 create with `intern`, a clean re-plan, update to `public` (CT read back `public`), no diff
 once the attribute was dropped from config, destroy.
 
+`subgroup_permission_depth` on `churchtools_group` ("Berechtigungen -> Wie viele Ebenen von
+Untergruppen sollen einbezogen werden?") is not in REST and not the group type's
+`permissionDepth`. It lives on the legacy churchauth ajax: read from
+`churchauth/ajax func=getMasterData` -> `data.churchauth.group["<id>"].permission_deep_no`
+(a string; one ~3.9 MB answer for all groups, cached per provider run and dropped by every
+write), written by `func=updateDeepNo domain_type=groupMemberstatus domain_id=<id> deep_no=<n>`.
+Measured on eqrm-dev on 2026-11-19 (probe on group 1698, restored): read 1, write 2, read 2,
+write 1, read 1. The classic UI offers 0, 1, 2, 3 and 999 ("Alle Ebenen"); CT validates
+nothing (`deep_no=7` was stored, an unknown `domain_id` answered success), so the schema
+accepts only those five and every write is read back, a group missing from the read is an
+error. Unset in config it is not managed: no read, no write, null in state. An import leaves
+it null, so the first plan after importing with the attribute set shows `null -> N` and
+applies an idempotent write. The provider path ran live on eqrm-dev on 2026-11-19 (group 1698, tofu import, no group
+created or destroyed): the import plan showed `null -> 1`, apply wrote 1 and read it back, the
+re-plan was empty; 1 -> 2 and 2 -> 1 each applied, read back and re-planned empty. Prod was
+not touched.
+
 `inform_leader` on `churchtools_group` reads from `settings.informLeader` and writes a
 flat top-level `informLeader`. The OpenAPI spec documents no write body for it, so the
 contract was measured on eqrm-dev on 2026-10-26 with disposable groups, deleted

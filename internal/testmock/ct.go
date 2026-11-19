@@ -52,6 +52,8 @@ type Server struct {
 	ignoreOnPost map[string]map[string]bool
 	// perm holds the permission routes' state (permissions.go).
 	perm *permState
+	// depthSt backs the per-group subgroup permission depth (groupdepth.go).
+	depthSt *depthState
 	// roleMembers makes DELETE /group/roles/{id} answer 409 (roles.go).
 	roleMembers map[string]int
 	// growPathDeletes counts DELETEs that removed a growth path (growpaths.go).
@@ -973,6 +975,9 @@ func (s *Server) handleLegacy(w http.ResponseWriter, r *http.Request) {
 				},
 			},
 		}
+		if strings.HasPrefix(r.URL.Query().Get("q"), "churchauth") {
+			payload["churchauth"] = map[string]any{"group": s.churchauthGroups()}
+		}
 		if s.perm != nil {
 			s.perm.authTableCalls++
 			if s.perm.authTableFails {
@@ -982,6 +987,12 @@ func (s *Server) handleLegacy(w http.ResponseWriter, r *http.Request) {
 			payload["auth_table"] = s.perm.authTable()
 		}
 		writeStatus(payload)
+	case "updateDeepNo":
+		s.updateDeepNo(map[string]string{
+			"domain_type": r.Form.Get("domain_type"), "domain_id": r.Form.Get("domain_id"), "deep_no": r.Form.Get("deep_no"),
+		})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": nil})
 	case "saveMasterData":
 		if r.Form.Get("table") == "cdb_privacy_policy_agreement_types" {
 			s.savePrivacyAgreementType(r, writeStatus, writeErr)
