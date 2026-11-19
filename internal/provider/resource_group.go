@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -57,6 +58,14 @@ const groupCollection = "/groups"
 // does NOT validate the value (a PATCH with "bogus" answered 200 and stored it), so the
 // schema does. `hidden` matters: type rights (permission 1108) do not apply to hidden groups.
 //
+// subgroup_permission_depth ("Wie viele Ebenen von Untergruppen sollen einbezogen werden?")
+// is Optional + Computed too, but costs a ~4 MB read, so it is stricter about unset: left
+// out, nothing is read, written or diffed and state holds null. An import leaves it null
+// too (Read never sees config); the first plan after importing with the attribute set shows
+// null -> N, and that apply writes N (idempotent) and reads it back. It is NOT in REST: it lives on the
+// legacy churchauth ajax (client/groupdepth.go). CT validates neither the value nor the
+// group id on write, so the schema validates the value and every write is read back.
+//
 // Read shape, probed read-only on eqrm-dev on 2026-10-16: the row nests the three
 // ids under `information`, and campusId is always there, JSON null or an int.
 // Writes take them FLAT at the top level. POST and PATCH ran live on eqrm-dev
@@ -74,6 +83,52 @@ type groupModel struct {
 	CampusID      types.String `tfsdk:"campus_id"`
 	InformLeader  types.Bool   `tfsdk:"inform_leader"`
 	Visibility    types.String `tfsdk:"visibility"`
+
+	SubgroupPermissionDepth types.Int64 `tfsdk:"subgroup_permission_depth"`
+}
+
+// depthManaged reports whether subgroup_permission_depth is set in config (see informLeaderManaged).
+func depthManaged(v types.Int64) bool { return !v.IsNull() && !v.IsUnknown() }
+
+type oneOfInt64 []int64
+
+func (v oneOfInt64) Description(context.Context) string {
+	parts := make([]string, len(v))
+	for i, n := range v {
+		parts[i] = strconv.FormatInt(n, 10)
+	}
+	return "value must be one of: " + strings.Join(parts, ", ")
+}
+func (v oneOfInt64) MarkdownDescription(ctx context.Context) string { return v.Description(ctx) }
+func (v oneOfInt64) ValidateInt64(ctx context.Context, req validator.Int64Request, resp *validator.Int64Response) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	for _, ok := range v {
+		if req.ConfigValue.ValueInt64() == ok {
+			return
+		}
+	}
+	resp.Diagnostics.AddAttributeError(req.Path, "Ungültiger Wert",
+		fmt.Sprintf("%d ist nicht erlaubt. %s (999 = alle Ebenen).", req.ConfigValue.ValueInt64(), v.Description(ctx)))
+}
+
+// writeDepth sets the depth, reads it back and errors if CT did not store it. The
+// returned value is what CT holds (null when that could not be read).
+func (r *groupResource) writeDepth(ctx context.Context, id string, want int64) (types.Int64, error) {
+	if err := r.client.SetGroupPermissionDepth(ctx, id, want); err != nil {
+		return types.Int64Null(), fmt.Errorf("subgroup_permission_depth = %d konnte nicht gesetzt werden: %w", want, err)
+	}
+	got, err := r.client.GroupPermissionDepth(ctx, id)
+	if err != nil {
+		return types.Int64Null(), fmt.Errorf("subgroup_permission_depth = %d wurde gesendet, konnte aber nicht zurückgelesen werden: %w", want, err)
+	}
+	if got != want {
+		return types.Int64Value(got), fmt.Errorf("Die Änderung an subgroup_permission_depth mit %d wurde angenommen "+
+			"(ChurchTools antwortet auch bei unbekannten Gruppen mit Erfolg), die Gruppe %s steht danach aber auf %d. "+
+			"Prüfe, ob die Gruppe existiert und der Token ihre Berechtigungen ändern darf", want, id, got)
+	}
+	return types.Int64Value(got), nil
 }
 
 // groupVisibilities are the values ChurchTools knows for a group's visibility.
@@ -160,6 +215,17 @@ func (r *groupResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Validators:    []validator.String{oneOfString(groupVisibilities)},
 				PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()},
 			},
+			"subgroup_permission_depth": schema.Int64Attribute{
+				Optional: true,
+				Computed: true,
+				Description: "Berechtigungen -> \"Wie viele Ebenen von Untergruppen sollen einbezogen werden?\": " +
+					"how many levels of subgroups the group's role permissions reach (0 = none, 1, 2, 3, 999 = all " +
+					"levels). Not the group type's permission_depth. Left out, the provider does not manage it: " +
+					"nothing is read or written (the read is ~4 MB), the state holds null. Set, it is enforced and " +
+					"drift is reported. ChurchTools does not validate the value, so only 0, 1, 2, 3 and 999 are accepted.",
+				Validators:    []validator.Int64{oneOfInt64(client.SubgroupDepths)},
+				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
+			},
 		},
 	}
 }
@@ -219,6 +285,10 @@ func (r *groupResource) Create(ctx context.Context, req resource.CreateRequest, 
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	// The depth is written after the group exists; until then state holds null.
+	wantDepth := plan.SubgroupPermissionDepth
+	plan.SubgroupPermissionDepth = types.Int64Null()
 
 	body := client.Row{}
 	for _, f := range groupFields {
@@ -305,6 +375,15 @@ func (r *groupResource) Create(ctx context.Context, req resource.CreateRequest, 
 		}
 	}
 	plan.InformLeader = have
+	if depthManaged(wantDepth) {
+		got, err := r.writeDepth(ctx, id, wantDepth.ValueInt64())
+		plan.SubgroupPermissionDepth = got
+		if err != nil {
+			resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
+			resp.Diagnostics.AddError("Gruppe wurde angelegt, subgroup_permission_depth aber nicht gesetzt", err.Error())
+			return
+		}
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 	if visibilityManaged(wantVis) && !wantVis.Equal(plan.Visibility) {
 		resp.Diagnostics.AddError("ChurchTools hat die Änderung ignoriert",
@@ -347,7 +426,19 @@ func (r *groupResource) Read(ctx context.Context, req resource.ReadRequest, resp
 		resp.Diagnostics.AddError("Gruppe konnte nicht gelesen werden", err.Error())
 		return
 	}
-	resp.Diagnostics.Append(resp.State.Set(ctx, groupFromRow(state.ID.ValueString(), row))...)
+	m := groupFromRow(state.ID.ValueString(), row)
+	m.SubgroupPermissionDepth = state.SubgroupPermissionDepth
+	// Only a group that holds a depth in state (set in config, or imported) pays for the
+	// ~4 MB read; the client caches it for the rest of the run.
+	if !state.SubgroupPermissionDepth.IsNull() {
+		n, err := r.client.GroupPermissionDepth(ctx, state.ID.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("subgroup_permission_depth konnte nicht gelesen werden", err.Error())
+			return
+		}
+		m.SubgroupPermissionDepth = types.Int64Value(n)
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, m)...)
 }
 
 func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -370,7 +461,30 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	var cfgDepth types.Int64
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("subgroup_permission_depth"), &cfgDepth)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	id := state.ID.ValueString()
+
+	// The depth goes first: it is a separate endpoint, and from here `depth` is what
+	// every later state write must carry. Unset in config, state's value (null or not)
+	// stays; the plan can't tell, as it is unknown for a null state.
+	depth := state.SubgroupPermissionDepth
+	if depthManaged(cfgDepth) && !cfgDepth.Equal(state.SubgroupPermissionDepth) {
+		got, err := r.writeDepth(ctx, id, cfgDepth.ValueInt64())
+		if err != nil {
+			if !got.IsNull() {
+				// CT holds something else than asked: record it so the next plan shows the gap.
+				resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("subgroup_permission_depth"), got)...)
+			}
+			resp.Diagnostics.AddError("subgroup_permission_depth konnte nicht gesetzt werden", err.Error())
+			return
+		}
+		depth = got
+	}
+	plan.SubgroupPermissionDepth = depth
 
 	// PATCH only what changed: it leaves everything else on the group (and
 	// anything edited in the UI since the last refresh) alone.
@@ -415,13 +529,16 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	// happens next; every later error path must record that, not the stale state.
 	migrated := state
 	migrated.GroupTypeID = plan.GroupTypeID
+	migrated.SubgroupPermissionDepth = depth
 	if len(body) > 0 {
 		if _, err := r.client.Update(ctx, groupCollection, id, "PATCH", body); err != nil {
 			resp.Diagnostics.AddError("Gruppe konnte nicht aktualisiert werden", err.Error())
 			if typeChanged {
 				// The migration already landed; record it so the next plan starts from the truth.
 				if after, gerr := r.client.Get(ctx, groupCollection, id); gerr == nil {
-					resp.Diagnostics.Append(resp.State.Set(ctx, groupFromRow(id, after))...)
+					m := groupFromRow(id, after)
+					m.SubgroupPermissionDepth = depth
+					resp.Diagnostics.Append(resp.State.Set(ctx, m)...)
 				}
 			}
 			return
@@ -441,6 +558,7 @@ func (r *groupResource) Update(ctx context.Context, req resource.UpdateRequest, 
 		return
 	}
 	got := groupFromRow(id, after)
+	got.SubgroupPermissionDepth = depth
 	for _, f := range groupFields {
 		if want := f.get(plan); !want.Equal(f.get(got)) {
 			resp.Diagnostics.AddError(
