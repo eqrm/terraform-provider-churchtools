@@ -59,8 +59,9 @@ const groupCollection = "/groups"
 // schema does. `hidden` matters: type rights (permission 1108) do not apply to hidden groups.
 //
 // subgroup_permission_depth ("Wie viele Ebenen von Untergruppen sollen einbezogen werden?")
-// is Optional + Computed too, but costs a ~4 MB read, so it is stricter about unset: left
-// out, nothing is read, written or diffed and state holds null. An import leaves it null
+// is Optional + Computed too, but costs a ~4 MB read, so it is stricter about unset: never
+// set, nothing is read, written or diffed and state holds null (removed from config after
+// being set, it is no longer written, but state keeps the value and Read still refreshes it). An import leaves it null
 // too (Read never sees config); the first plan after importing with the attribute set shows
 // null -> N, and that apply writes N (idempotent) and reads it back. It is NOT in REST: it lives on the
 // legacy churchauth ajax (client/groupdepth.go). CT validates neither the value nor the
@@ -220,9 +221,10 @@ func (r *groupResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				Computed: true,
 				Description: "Berechtigungen -> \"Wie viele Ebenen von Untergruppen sollen einbezogen werden?\": " +
 					"how many levels of subgroups the group's role permissions reach (0 = none, 1, 2, 3, 999 = all " +
-					"levels). Not the group type's permission_depth. Left out, the provider does not manage it: " +
+					"levels). Not the group type's permission_depth. Never set, the provider does not manage it: " +
 					"nothing is read or written (the read is ~4 MB), the state holds null. Set, it is enforced and " +
-					"drift is reported. ChurchTools does not validate the value, so only 0, 1, 2, 3 and 999 are accepted.",
+					"drift is reported. Removed from config later, it is no longer written, but the last value stays " +
+					"in state and is still refreshed. ChurchTools does not validate the value, so only 0, 1, 2, 3 and 999 are accepted.",
 				Validators:    []validator.Int64{oneOfInt64(client.SubgroupDepths)},
 				PlanModifiers: []planmodifier.Int64{int64planmodifier.UseStateForUnknown()},
 			},
